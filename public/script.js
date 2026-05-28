@@ -1656,7 +1656,14 @@ window.selectTopup = async (id, method = 'vietqr') => {
         if (!snapshot.empty) {
             const existingDoc = snapshot.docs[0].data();
             transferContent = existingDoc.transferContent;
-            console.log("♻️ Tái sử dụng đơn nạp tiền cũ đang chờ:", transferContent);
+            // Nếu pending cũ thuộc format cũ (không có prefix) thì tạo mã mới để gateway route đúng.
+            if (!String(transferContent || '').toUpperCase().startsWith(TOPUP_PREFIX)) {
+                console.log("♻️ Pending topup cũ không đúng prefix, tạo mã mới:", transferContent);
+                const randomStr = Math.random().toString(36).substring(2, 6).toUpperCase();
+                transferContent = `${TOPUP_PREFIX}${selectedTopupPackage.coins}${randomStr}`;
+            } else {
+                console.log("♻️ Tái sử dụng đơn nạp tiền cũ đang chờ:", transferContent);
+            }
         } else {
             const randomStr = Math.random().toString(36).substring(2, 6).toUpperCase();
             transferContent = `${TOPUP_PREFIX}${selectedTopupPackage.coins}${randomStr}`;
