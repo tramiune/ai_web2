@@ -66,8 +66,8 @@ WORKER_URL = "https://motionai-upload-api.traderfinn0312.workers.dev"
 browser_lock = threading.Lock()
 SHOW_CHROME = os.environ.get("SHOW_CHROME", "1").strip() not in ("0", "false", "False")
 
-TELEGRAM_BOT_TOKEN = "8676046240:AAE14lDxAj9otGTjVnd8Smr2__Wg-J2dCLc"
-TELEGRAM_CHAT_ID = "6067707939"
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "8855918099:AAHmPUWTe6_dicXyh0nseADQomVv6MGKjGQ")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "6067707939")
 AIDANCING_LOW_BALANCE_THRESHOLD = 10
 
 def normalize_bot_name(name):

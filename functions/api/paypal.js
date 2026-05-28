@@ -30,7 +30,7 @@
  */
 
 // --- Static credentials (ENV vars override these in production) ---------------
-const TELEGRAM_BOT_TOKEN = '8676046240:AAE14lDxAj9otGTjVnd8Smr2__Wg-J2dCLc';
+const TELEGRAM_BOT_TOKEN = '8855918099:AAHmPUWTe6_dicXyh0nseADQomVv6MGKjGQ';
 const TELEGRAM_CHAT_ID = '6067707939';
 
 // Sandbox credentials provided by store owner. Override with PAYPAL_* env vars.
