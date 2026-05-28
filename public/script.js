@@ -1641,6 +1641,7 @@ window.selectTopup = async (id, method = 'vietqr') => {
 
     const { db, collection, addDoc, serverTimestamp, query, where, getDocs } = window.firebase;
     let transferContent = "";
+    const TOPUP_PREFIX = "NH"; // Prefix để Casso gateway route đúng web (Nhay Cloud)
     
     try {
         const q = query(
@@ -1658,7 +1659,7 @@ window.selectTopup = async (id, method = 'vietqr') => {
             console.log("♻️ Tái sử dụng đơn nạp tiền cũ đang chờ:", transferContent);
         } else {
             const randomStr = Math.random().toString(36).substring(2, 6).toUpperCase();
-            transferContent = `${selectedTopupPackage.coins} COIN ${randomStr}`;
+            transferContent = `${TOPUP_PREFIX}${selectedTopupPackage.coins}${randomStr}`;
             
             await addDoc(collection(db, "topups"), {
                 userId: currentUser.uid,
@@ -1677,7 +1678,7 @@ window.selectTopup = async (id, method = 'vietqr') => {
     } catch (err) {
         console.error("Lỗi khi kiểm tra/tạo bản ghi nạp tiền:", err);
         const randomStr = Math.random().toString(36).substring(2, 6).toUpperCase();
-        transferContent = `${selectedTopupPackage.coins} COIN ${randomStr}`;
+        transferContent = `${TOPUP_PREFIX}${selectedTopupPackage.coins}${randomStr}`;
     }
 
     document.getElementById('topup-package-info').innerHTML = `
