@@ -1,25 +1,22 @@
 /**
- * Casso Webhook Handler (Production Ready - Hardcoded Credentials)
- * MotionAI Studio - Automated Top-up
+ * Casso Webhook Handler
+ *
+ * IMPORTANT: Never hardcode Firebase service account credentials in git.
+ * Provide JSON via env vars: FIREBASE_SERVICE_ACCOUNT (preferred) or SERVICE_ACCOUNT.
  */
 
 const TELEGRAM_BOT_TOKEN = '8676046240:AAE14lDxAj9otGTjVnd8Smr2__Wg-J2dCLc';
 const TELEGRAM_CHAT_ID = '6067707939';
 
-// Dán toàn bộ nội dung file JSON của bạn vào đây
-const SERVICE_ACCOUNT = {
-  "type": "service_account",
-  "project_id": "motionai-studio-76be9",
-  "private_key_id": "a66df98cff206819acb3cd55f0297e57527d2e53",
-  "private_key": "-----BEGIN PRIVATE KEY-----\nDUMMY_KEY_FOR_GITHUB_PUSH_PROTECTION\n-----END PRIVATE KEY-----\n",
-  "client_email": "firebase-adminsdk-fbsvc@motionai-studio-76be9.iam.gserviceaccount.com",
-  "client_id": "100366378819877121287",
-  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
-  "token_uri": "https://oauth2.googleapis.com/token",
-  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/firebase-adminsdk-fbsvc%40motionai-studio-76be9.iam.gserviceaccount.com",
-  "universe_domain": "googleapis.com"
-};
+function getServiceAccountFromEnv(env) {
+  const envSecret = env ? (env.FIREBASE_SERVICE_ACCOUNT || env.SERVICE_ACCOUNT) : null;
+  if (!envSecret) throw new Error("Missing FIREBASE_SERVICE_ACCOUNT (or SERVICE_ACCOUNT) env var");
+  try {
+    return JSON.parse(envSecret);
+  } catch (e) {
+    throw new Error("Invalid FIREBASE_SERVICE_ACCOUNT JSON");
+  }
+}
 
 export async function onRequestPost(context) {
     const { request, env } = context;
@@ -27,16 +24,7 @@ export async function onRequestPost(context) {
       const body = await request.json();
       if (!body.data || !Array.isArray(body.data)) return new Response("No data", { status: 400 });
 
-      // Lấy thông tin Service Account từ Environment Variable (nếu có), nếu không thì dùng bản hardcoded
-      let config = SERVICE_ACCOUNT;
-      const envSecret = env ? (env.FIREBASE_SERVICE_ACCOUNT || env.SERVICE_ACCOUNT) : null;
-      if (envSecret) {
-        try {
-          config = JSON.parse(envSecret);
-        } catch (e) {
-          console.error("Lỗi parse SERVICE_ACCOUNT từ ENV:", e);
-        }
-      }
+      const config = getServiceAccountFromEnv(env);
 
       // Lấy Token
       const accessToken = await getAccessToken(config.client_email, config.private_key);
@@ -69,7 +57,7 @@ export async function onRequestPost(context) {
                continue; // Bỏ qua, không cộng coin
            }
 
-           await grantCoins(accessToken, topup.userId, coins, topup.id);
+           await grantCoins(accessToken, config.project_id, topup.userId, coins, topup.id);
            console.log(`Successfully granted ${coins} coins to user ${topup.userId}`);
            
            // Gửi thông báo Telegram
@@ -163,7 +151,7 @@ async function getAccessToken(email, privateKey) {
 }
 
 async function fetchPendingTopups(token, projectId) {
-  const PROJECT_ID = projectId || "motionai-studio-76be9";
+  const PROJECT_ID = projectId;
   const url = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents:runQuery`;
   const res = await fetch(url, {
     method: "POST",
@@ -199,8 +187,8 @@ async function fetchPendingTopups(token, projectId) {
     });
 }
 
-async function grantCoins(token, userId, coins, topupId) {
-  const PROJECT_ID = "motionai-studio-76be9";
+async function grantCoins(token, projectId, userId, coins, topupId) {
+  const PROJECT_ID = projectId;
   const baseUrl = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents`;
   
   const userRes = await fetch(`${baseUrl}/users/${userId}`, { headers: { "Authorization": `Bearer ${token}` } });
