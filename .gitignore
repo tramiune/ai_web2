@@ -19,4 +19,5 @@ bot_chrome_profile/
 *.mp4
 *.png
 !public/icon-*.png
+!public/logo.png
 *.jpg
