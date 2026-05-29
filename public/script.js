@@ -21,14 +21,11 @@ function safeToDate(field) {
 }
 
 // --- Data Constants ---
-// IMPORTANT: usdPrice here is for display only. Server-side `PACKAGES` in
-// functions/api/paypal.js is the source of truth for the actual charge.
-// Keep them in sync (id + coins + USD value).
 const COIN_PACKAGES = [
-    { id: 'starter_v2', name: 'Starter',    coins: 20,   price: '40.000đ',   usdPrice: '$2.99',  amount: 40000,   hasBonus: false },
-    { id: 'creator',    name: 'Creator',    coins: 100,  price: '100.000đ',  usdPrice: '$5.99',  amount: 100000, featured: true, hasBonus: true },
-    { id: 'studio',     name: 'Studio',     coins: 550,  price: '500.000đ',  usdPrice: '$24.99', amount: 500000,  hasBonus: true },
-    { id: 'pro-studio', name: 'Enterprise', coins: 1100, price: '1.000.000đ', usdPrice: '$49.99', amount: 1000000, hasBonus: true }
+    { id: 'starter_v2', name: 'Starter',    coins: 20,   price: '40.000đ',   amount: 40000,   hasBonus: false },
+    { id: 'creator',    name: 'Creator',    coins: 100,  price: '100.000đ',  amount: 100000, featured: true, hasBonus: true },
+    { id: 'studio',     name: 'Studio',     coins: 550,  price: '500.000đ',  amount: 500000,  hasBonus: true },
+    { id: 'pro-studio', name: 'Enterprise', coins: 1100, price: '1.000.000đ', amount: 1000000, hasBonus: true }
 ];
 
 const AI_MODELS = [
@@ -167,7 +164,6 @@ async function getVideoDurationSeconds(file) {
 
 let currentUser = null;
 let selectedTopupPackage = null;
-let selectedPaymentMethod = 'vietqr';
 let isFirstTimeUser = false; // Flag for special offer (0 or 1 order)
 let orderCount = 0; // Track total orders
 let initialCoinsBeforeTopup = 0; // Để theo dõi số dư trước khi nạp
@@ -1331,7 +1327,6 @@ function renderPricing() {
     const filteredPackages = COIN_PACKAGES;
 
     const vietqrPayIcon = `<svg class="pricing-pay-icon pricing-pay-icon--vietqr" viewBox="0 0 24 24" aria-hidden="true"><rect width="24" height="24" rx="3" fill="#DA251D"/><path fill="#FFCD00" d="M12 5.4l1.55 3.14 3.46.5-2.5 2.44.59 3.45L12 14.7l-3.1 1.63.59-3.45-2.5-2.44 3.46-.5L12 5.4z"/></svg>`;
-    const intlPayIcon = `<svg class="pricing-pay-icon pricing-pay-icon--intl" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="8.5" stroke="currentColor" stroke-width="1.5"/><path d="M4 12h16M12 4.2c2.2 2.8 2.2 12.8 0 15.6M12 4.2c-2.2 2.8-2.2 12.8 0 15.6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>`;
     const coinIcon = `<svg class="coin-icon-svg" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 2L20.66 7V17L12 22L3.34 17V7L12 2Z" fill="url(#coin-gradient)" fill-opacity="0.2" stroke="url(#coin-gradient)" stroke-width="2"/><path d="M12 6L17.2 9V15L12 18L6.8 15V9L12 6Z" fill="url(#coin-gradient)"/><path d="M12 9V15M9 12H15" stroke="white" stroke-width="1.5" stroke-linecap="round"/></svg>`;
 
     const buildCoinCard = (pkg, { showFeatures = false } = {}) => {
@@ -1354,11 +1349,7 @@ function renderPricing() {
             <div class="price-value">${pkg.price}</div>
             ${featuresHtml}
             <div class="pricing-pay-actions">
-                <button type="button" class="pricing-pay-btn pricing-pay-btn--intl" onclick="window.selectTopup('${pkg.id}', 'intl')">
-                    ${intlPayIcon}
-                    <span class="pricing-pay-label pricing-pay-label--single">${t('pricing.pay_intl')}</span>
-                </button>
-                <button type="button" class="pricing-pay-btn pricing-pay-btn--vietqr" onclick="window.selectTopup('${pkg.id}', 'vietqr')">
+                <button type="button" class="pricing-pay-btn pricing-pay-btn--vietqr" onclick="window.selectTopup('${pkg.id}')">
                     ${vietqrPayIcon}
                     <span class="pricing-pay-label pricing-pay-label--single">${t('pricing.pay_vietqr')}</span>
                 </button>
@@ -1587,43 +1578,14 @@ window.openPricingModal = () => {
     logFirebaseEvent('view_item_list', { item_list_name: 'Topup Packages' });
 };
 
-window.selectTopup = async (id, method = 'vietqr') => {
+window.selectTopup = async (id) => {
     if (!currentUser) return login();
 
     selectedTopupPackage = COIN_PACKAGES.find(p => p.id === id);
-    selectedPaymentMethod = method === 'intl' ? 'intl' : 'vietqr';
-
-    _paypalLastPackageId = null;
-    const ppContainer = document.getElementById('paypal-button-container');
-    if (ppContainer) ppContainer.innerHTML = '';
-    setPaypalStatus('');
 
     initialCoinsBeforeTopup = parseInt((document.getElementById('coin-balance') || document.querySelector('.coin-balance-text'))?.innerText) || 0;
 
     closeModal('pricing-modal');
-    showPaymentPanel(selectedPaymentMethod);
-
-    if (selectedPaymentMethod === 'intl') {
-        if (typeof ttq !== 'undefined') {
-            ttq.track('InitiateCheckout', {
-                value: parseFloat(String(selectedTopupPackage.usdPrice || '0').replace(/[^0-9.]/g, '')) || 0,
-                currency: 'USD',
-                content_id: selectedTopupPackage.id
-            });
-        }
-        logFirebaseEvent('begin_checkout', {
-            value: parseFloat(String(selectedTopupPackage.usdPrice || '0').replace(/[^0-9.]/g, '')) || 0,
-            currency: 'USD',
-            items: [{ item_id: selectedTopupPackage.id, item_name: selectedTopupPackage.name }]
-        });
-        renderIntlPackageInfo();
-        mountPaypalButtons(selectedTopupPackage).catch(err => {
-            console.error('[PayPal] mountPaypalButtons failed:', err);
-            setPaypalStatus(t('payment.paypal_load_error', { msg: err.message || err }), '#ff6b6b');
-        });
-        window.openModal('topup-modal');
-        return;
-    }
 
     if (typeof ttq !== 'undefined') {
         ttq.track('InitiateCheckout', {
@@ -1701,7 +1663,7 @@ window.selectTopup = async (id, method = 'vietqr') => {
                 <div class="package-details">
                     <div class="pkg-label">${t('dashboard.col_package')}</div>
                     <div class="pkg-name">${packageDisplayName(selectedTopupPackage)}</div>
-                    <div class="pkg-coins">${t('payment.intl_coins', { coins: selectedTopupPackage.coins })}</div>
+                    <div class="pkg-coins">+${selectedTopupPackage.coins} ${t('common.coins_unit')}</div>
                 </div>
             </div>
             <div class="topup-info-price">
@@ -3995,7 +3957,7 @@ async function sendCompletionEmail(orderId, orderData) {
 }
 
 // ==========================================
-// 4 Model AI & Payment Tabs (Casso + PayPal)
+// 4 Model AI & Payment (VietQR / Casso)
 // ==========================================
 
 export function renderAIModels() {
@@ -4072,195 +4034,6 @@ window.createVideoWithModel = (modelId) => {
     // Mở Order Modal
     window.openOrderModal();
 };
-
-function renderIntlPackageInfo() {
-    if (!selectedTopupPackage) return;
-    const intlInfo = document.getElementById('intl-package-info');
-    if (!intlInfo) return;
-    intlInfo.innerHTML = `
-        <div style="font-size: 0.8rem; color: var(--text-muted); text-transform: uppercase; font-weight:600; margin-bottom: 5px;">${t('payment.intl_selected_package')}</div>
-        <div style="font-size: 1.8rem; font-weight: 800; color: var(--accent); margin: 0.5rem 0; letter-spacing: 0.5px;">${packageDisplayName(selectedTopupPackage)}</div>
-        <div style="font-size: 1.1rem; font-weight: 700; color: #fff; margin-bottom: 10px;">${t('payment.intl_coins', { coins: selectedTopupPackage.coins })}</div>
-        <div style="font-size: 1.4rem; font-weight: 800; color: #ffde00; margin-top: 0.8rem; background: rgba(255,222,0,0.1); padding: 8px; border-radius: 6px; display: inline-block;">${t('payment.intl_price', { price: selectedTopupPackage.usdPrice || '$5.99' })}</div>
-    `;
-}
-
-function showPaymentPanel(method) {
-    const vietqrContent = document.getElementById('payment-content-vietqr');
-    const intlContent = document.getElementById('payment-content-intl');
-    if (!vietqrContent || !intlContent) return;
-
-    if (method === 'intl') {
-        vietqrContent.style.display = 'none';
-        intlContent.style.display = 'block';
-        return;
-    }
-
-    vietqrContent.style.display = 'block';
-    intlContent.style.display = 'none';
-}
-
-// Kept for backward compatibility if anything still calls it.
-window.switchPaymentTab = (tabName) => showPaymentPanel(tabName);
-
-// ==========================================
-// PayPal Smart Buttons Integration
-// ==========================================
-
-// Cached PayPal config from /api/paypal-config (clientId + env).
-let _paypalConfig = null;
-// Resolves to true when SDK script has loaded once.
-let _paypalSdkPromise = null;
-// Last package we rendered buttons for, so we can re-render when user switches package.
-let _paypalLastPackageId = null;
-
-function setPaypalStatus(text, color) {
-    const el = document.getElementById('paypal-status');
-    if (!el) return;
-    el.textContent = text || '';
-    el.style.color = color || 'var(--text-muted)';
-}
-
-async function fetchPaypalConfig() {
-    if (_paypalConfig) return _paypalConfig;
-    const res = await fetch('/api/paypal-config');
-    if (!res.ok) throw new Error(`paypal-config HTTP ${res.status}`);
-    _paypalConfig = await res.json();
-    return _paypalConfig;
-}
-
-function loadPaypalSdk(clientId, currency) {
-    if (_paypalSdkPromise) return _paypalSdkPromise;
-    _paypalSdkPromise = new Promise((resolve, reject) => {
-        const s = document.createElement('script');
-        // disable-funding=credit,paylater so we only show wallet + card; tweak as needed.
-        s.src = `https://www.paypal.com/sdk/js?client-id=${encodeURIComponent(clientId)}&currency=${encodeURIComponent(currency || 'USD')}&intent=capture&components=buttons`;
-        s.async = true;
-        s.onload = () => resolve(window.paypal);
-        s.onerror = () => reject(new Error('Could not load PayPal SDK'));
-        document.head.appendChild(s);
-    });
-    return _paypalSdkPromise;
-}
-
-async function mountPaypalButtons(pkg) {
-    if (!pkg) return;
-    if (!currentUser) {
-        setPaypalStatus(t('payment.paypal_login_required'), '#ff6b6b');
-        return;
-    }
-
-    const container = document.getElementById('paypal-button-container');
-    if (!container) return;
-
-    // If the same package is already rendered, skip - PayPal buttons are idempotent
-    // per container, and re-rendering causes a flash.
-    if (_paypalLastPackageId === pkg.id && container.childElementCount > 0) {
-        return;
-    }
-
-    setPaypalStatus(t('payment.paypal_loading'), 'var(--text-muted)');
-    container.innerHTML = '';
-
-    const cfg = await fetchPaypalConfig();
-    if (!cfg.clientId) {
-        setPaypalStatus(t('payment.paypal_not_configured'), '#ff6b6b');
-        return;
-    }
-
-    // Show sandbox banner if applicable.
-    const banner = document.getElementById('paypal-sandbox-banner');
-    if (banner) banner.style.display = cfg.env === 'sandbox' ? 'block' : 'none';
-
-    const paypal = await loadPaypalSdk(cfg.clientId, cfg.currency || 'USD');
-    if (!paypal || !paypal.Buttons) {
-        setPaypalStatus(t('payment.paypal_sdk_unavailable'), '#ff6b6b');
-        return;
-    }
-
-    paypal.Buttons({
-        style: { layout: 'vertical', color: 'gold', shape: 'rect', label: 'paypal' },
-
-        createOrder: async () => {
-            setPaypalStatus(t('payment.paypal_creating_order'), 'var(--text-muted)');
-            const res = await fetch('/api/paypal-create-order', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    userId: currentUser.uid,
-                    packageId: pkg.id,
-                    userEmail: currentUser.email || ''
-                })
-            });
-            const data = await res.json();
-            if (!res.ok || !data.orderID) {
-                throw new Error(data.error || `Create order failed (${res.status})`);
-            }
-            return data.orderID;
-        },
-
-        onApprove: async (data) => {
-            setPaypalStatus(t('payment.paypal_processing'), 'var(--text-muted)');
-            try {
-                const res = await fetch('/api/paypal-capture-order', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ orderID: data.orderID })
-                });
-                const result = await res.json();
-                if (!res.ok) {
-                    throw new Error(result.error || `Capture failed (${res.status})`);
-                }
-                if (result.status === 'COMPLETED') {
-                    setPaypalStatus(t('payment.paypal_success_status'), '#27ae60');
-                    showToast(t('payment.toast_paypal_success'));
-                    // The webhook is the source of truth for coin grant; the
-                    // Firebase onSnapshot on the user doc will refresh the
-                    // balance display automatically.
-                    if (typeof ttq !== 'undefined') {
-                        try {
-                            ttq.track('CompletePayment', {
-                                value: parseFloat((pkg.usdPrice || '$0').replace('$', '')),
-                                currency: 'USD',
-                                content_id: pkg.id
-                            });
-                        } catch (e) { /* swallow */ }
-                    }
-                    logFirebaseEvent('purchase', {
-                        currency: 'USD',
-                        value: parseFloat((pkg.usdPrice || '$0').replace('$', '')),
-                        transaction_id: data.orderID,
-                        items: [{ item_id: pkg.id, item_name: pkg.name }]
-                    });
-                } else {
-                    setPaypalStatus(t('payment.paypal_pending_status', { status: result.status }), '#ffde00');
-                }
-            } catch (err) {
-                console.error('[PayPal] onApprove error:', err);
-                setPaypalStatus(t('payment.paypal_capture_error', { msg: err.message || err }), '#ff6b6b');
-                showToast(t('payment.paypal_error', { msg: err.message || err }));
-            }
-        },
-
-        onCancel: () => {
-            setPaypalStatus(t('payment.paypal_cancelled'), 'var(--text-muted)');
-        },
-
-        onError: (err) => {
-            console.error('[PayPal] Buttons error:', err);
-            setPaypalStatus(t('payment.paypal_error', { msg: err.message || err }), '#ff6b6b');
-        }
-    }).render('#paypal-button-container').then(() => {
-        _paypalLastPackageId = pkg.id;
-        setPaypalStatus('', 'var(--text-muted)');
-    }).catch(err => {
-        console.error('[PayPal] Buttons render error:', err);
-        setPaypalStatus(t('payment.paypal_render_error', { msg: err.message || err }), '#ff6b6b');
-    });
-}
-
-// Expose for debugging from devtools.
-window.__paypal = { fetchPaypalConfig, mountPaypalButtons };
 
 // ==========================================
 // Referral / Affiliate System

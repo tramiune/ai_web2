@@ -634,22 +634,6 @@ button {
   text-align: left;
 }
 
-.pricing-pay-btn--intl {
-  opacity: 0.92;
-  font-size: 0.76rem;
-  padding: 0.55rem 0.8rem;
-  border-color: rgba(255, 255, 255, 0.1);
-  background: rgba(255, 255, 255, 0.03);
-  justify-content: center;
-  text-align: center;
-}
-
-.pricing-pay-btn--intl:hover {
-  opacity: 1;
-  border-color: rgba(255, 255, 255, 0.22);
-  background: rgba(255, 255, 255, 0.06);
-}
-
 .pricing-pay-btn--vietqr {
   padding: 0.75rem 0.9rem;
   border: 2px solid rgba(0, 242, 254, 0.55);
