@@ -22,8 +22,8 @@ function safeToDate(field) {
 
 // --- Data Constants ---
 const COIN_PACKAGES = [
-    { id: 'starter_v2', name: 'Starter',    coins: 20,   price: '40.000đ',   amount: 40000,   hasBonus: false },
-    { id: 'creator',    name: 'Creator',    coins: 100,  price: '100.000đ',  amount: 100000, featured: true, hasBonus: true },
+    { id: 'starter_v2', name: 'Starter',    coins: 40,   price: '80.000đ',   amount: 80000,   hasBonus: false, featured: true, showCompare: true },
+    { id: 'creator',    name: 'Creator',    coins: 100,  price: '100.000đ',  amount: 100000, hasBonus: true },
     { id: 'studio',     name: 'Studio',     coins: 550,  price: '500.000đ',  amount: 500000,  hasBonus: true },
     { id: 'pro-studio', name: 'Enterprise', coins: 1100, price: '1.000.000đ', amount: 1000000, hasBonus: true }
 ];
@@ -1377,6 +1377,10 @@ function renderPricing() {
     const buildCoinCard = (pkg, { showFeatures = false } = {}) => {
         const noteText = t(`pricing.notes.${pkg.id}`);
         const showNote = noteText && !noteText.startsWith('pricing.notes.');
+        const compareKey = `pricing.compare.${pkg.id}`;
+        const compareText = pkg.showCompare ? t(compareKey) : '';
+        const showCompare = compareText && !compareText.startsWith('pricing.compare.');
+        const perCoin = Math.round(pkg.amount / pkg.coins);
         const featuresHtml = showFeatures ? `
             <ul class="pkg-features">
                 <li><span class="check-icon">✓</span> ${t('pricing.instant_credit')}</li>
@@ -1384,14 +1388,17 @@ function renderPricing() {
                 <li><span class="check-icon">✓</span> ${t('pricing.no_expiry')}</li>
             </ul>` : '';
         return `
-        <div class="price-card price-card--coin">
+        <div class="price-card price-card--coin${pkg.featured ? ' featured price-card--deal' : ''}">
+            ${pkg.featured ? `<div class="featured-badge">${t('pricing.deal_badge')}</div>` : ''}
             <div class="price-card-note">${showNote ? noteText : '&#8203;'}</div>
+            ${showCompare ? `<div class="price-card-compare">${compareText}</div>` : ''}
             <div class="coin-amount-display">
                 ${coinIcon}
                 <span class="coin-amount-num">${pkg.coins}</span>
             </div>
             <div class="price-card-bonus-hint${pkg.hasBonus ? '' : ' price-card-bonus-hint--empty'}">${t('pricing.bonus_included_note')}</div>
             <div class="price-value">${pkg.price}</div>
+            ${showCompare ? `<div class="price-card-per-coin">${t('pricing.per_coin', { amount: perCoin.toLocaleString('vi-VN') })}</div>` : ''}
             ${featuresHtml}
             <div class="pricing-pay-actions">
                 <button type="button" class="pricing-pay-btn pricing-pay-btn--vietqr" onclick="window.selectTopup('${pkg.id}')">

@@ -183,15 +183,20 @@ window.TRANSLATIONS = {
             no_expiry: "Coin không hết hạn",
             bonus_included_note: "(Đã bao gồm số lượng tặng)",
             featured_hot: "Hot",
+            deal_badge: "Siêu thịt",
+            per_coin: "~{amount}đ/coin",
             start_now: "Bắt đầu ngay",
             pay_vietqr: "Chuyển khoản",
             pay_vietqr_sub: "",
             pay_intl: "Thẻ quốc tế",
             notes: {
-                starter_v2: "Gói giới hạn",
+                starter_v2: "40 coin · gấp đôi gói cũ",
                 creator: "Tặng 50 Coin",
                 studio: "Tặng 300 Coin",
                 "pro-studio": "Tặng 600 Coin"
+            },
+            compare: {
+                starter_v2: "Creator 100 coin = 100k — gói này 40 coin chỉ 80k, tiết kiệm 20k so với nạp lớn"
             },
             packages: {
                 starter_v2: "Starter",
@@ -815,15 +820,20 @@ window.TRANSLATIONS = {
             no_expiry: "Coins never expire",
             bonus_included_note: "(Bonus coins included)",
             featured_hot: "Hot",
+            deal_badge: "Best deal",
+            per_coin: "~{amount} VND/coin",
             start_now: "Get Started",
             pay_vietqr: "Bank transfer",
             pay_vietqr_sub: "",
             pay_intl: "Intl card",
             notes: {
-                starter_v2: "Limited package",
+                starter_v2: "40 coins · double the old pack",
                 creator: "Bonus 50 Coins",
                 studio: "Bonus 300 Coins",
                 "pro-studio": "Bonus 600 Coins"
+            },
+            compare: {
+                starter_v2: "Creator: 100 coins for 100k — this pack: 40 coins for 80k, save 20k vs big top-up"
             },
             packages: {
                 starter_v2: "Starter",

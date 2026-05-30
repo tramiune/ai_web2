@@ -601,6 +601,43 @@ button {
   letter-spacing: -0.5px;
 }
 
+.price-card--deal {
+  border: 2px solid #00f2fe;
+  background: linear-gradient(165deg, rgba(0, 242, 254, 0.08) 0%, rgba(168, 85, 247, 0.06) 100%);
+  box-shadow: 0 0 28px rgba(0, 242, 254, 0.18);
+}
+
+.price-card-compare {
+  font-size: 0.72rem;
+  line-height: 1.45;
+  color: #7ee8ff;
+  background: rgba(0, 242, 254, 0.08);
+  border: 1px solid rgba(0, 242, 254, 0.22);
+  border-radius: 8px;
+  padding: 0.45rem 0.55rem;
+  margin-bottom: 0.75rem;
+  text-align: left;
+}
+
+.price-card-per-coin {
+  font-size: 0.72rem;
+  color: var(--text-muted);
+  margin-top: 0.15rem;
+  margin-bottom: 0.5rem;
+}
+
+.price-card--deal .featured-badge {
+  background: linear-gradient(135deg, #00f2fe, #a855f7);
+}
+
+.price-card--deal .price-card-note {
+  color: #00f2fe;
+}
+
+.price-card--deal:hover {
+  box-shadow: 0 0 36px rgba(0, 242, 254, 0.28);
+}
+
 .price-card-bonus-hint {
   font-size: 0.68rem;
   color: var(--text-muted);
