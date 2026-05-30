@@ -22,8 +22,8 @@ function safeToDate(field) {
 
 // --- Data Constants ---
 const COIN_PACKAGES = [
-    { id: 'starter_v2', name: 'Starter',    coins: 40,   price: '80.000đ',   amount: 80000,   hasBonus: false, dimmed: true, showNudge: true },
-    { id: 'creator',    name: 'Creator',    coins: 100,  price: '100.000đ',  amount: 100000, hasBonus: true, featured: true, showUpsell: true },
+    { id: 'starter_v2', name: 'Starter',    coins: 20,   price: '40.000đ',   amount: 40000,   hasBonus: false },
+    { id: 'creator',    name: 'Creator',    coins: 100,  price: '100.000đ',  amount: 100000, featured: true, hasBonus: true },
     { id: 'studio',     name: 'Studio',     coins: 550,  price: '500.000đ',  amount: 500000,  hasBonus: true },
     { id: 'pro-studio', name: 'Enterprise', coins: 1100, price: '1.000.000đ', amount: 1000000, hasBonus: true }
 ];
@@ -168,9 +168,10 @@ let isFirstTimeUser = false; // Flag for special offer (0 or 1 order)
 let orderCount = 0; // Track total orders
 let dailyPromoRemaining = 0; // Số lượt 1 coin còn lại trong ngày (VN, reset 0h)
 
-/** Ưu đãi: tối đa 3 video/ngày giá 1 coin, reset lúc 0h (Asia/Ho_Chi_Minh). */
+/** Ưu đãi 1 Coin (~1.000đ): 1 lượt/ngày, tối đa 3 lần/user, reset 0h (VN). */
 const DAILY_PROMO_COST = 1;
-const DAILY_PROMO_PER_DAY = 3;
+const DAILY_PROMO_PER_DAY = 1;
+const DAILY_PROMO_MAX_TOTAL = 3;
 const VN_TIMEZONE = 'Asia/Ho_Chi_Minh';
 
 function getVnDateString(date = new Date()) {
@@ -179,13 +180,18 @@ function getVnDateString(date = new Date()) {
 
 function getDailyPromoStatus(orders = []) {
     const today = getVnDateString();
-    const todayCount = orders.filter((o) => o.dailyPromo === true && o.promoDate === today).length;
-    const remainingToday = Math.max(0, DAILY_PROMO_PER_DAY - todayCount);
+    const promoOrders = orders.filter((o) => o.dailyPromo === true);
+    const totalCount = promoOrders.length;
+    const todayCount = promoOrders.filter((o) => o.promoDate === today).length;
+    const remainingTotal = Math.max(0, DAILY_PROMO_MAX_TOTAL - totalCount);
+    const canUsePromo = remainingTotal > 0 && todayCount < DAILY_PROMO_PER_DAY;
     return {
         today,
         todayCount,
-        remainingToday,
-        canUsePromo: remainingToday > 0
+        totalCount,
+        remainingTotal,
+        remainingToday: canUsePromo ? 1 : 0,
+        canUsePromo
     };
 }
 
@@ -199,16 +205,20 @@ async function resolvePromoCostInTransaction(transaction, db, uid, baseCost) {
     const snap = await transaction.get(promoQuery);
     const today = getVnDateString();
     let todayCount = 0;
+    let totalCount = 0;
     snap.forEach((docSnap) => {
+        totalCount += 1;
         if (docSnap.data().promoDate === today) todayCount += 1;
     });
-    if (todayCount >= DAILY_PROMO_PER_DAY) {
-        return { cost: baseCost, isPromo: false, remainingToday: 0 };
+    const remainingTotal = Math.max(0, DAILY_PROMO_MAX_TOTAL - totalCount);
+    if (remainingTotal <= 0 || todayCount >= DAILY_PROMO_PER_DAY) {
+        return { cost: baseCost, isPromo: false, remainingToday: 0, remainingTotal };
     }
     return {
         cost: DAILY_PROMO_COST,
         isPromo: true,
-        remainingToday: DAILY_PROMO_PER_DAY - todayCount
+        remainingToday: 1,
+        remainingTotal: remainingTotal - 1
     };
 }
 let initialCoinsBeforeTopup = 0; // Để theo dõi số dư trước khi nạp
@@ -1377,13 +1387,6 @@ function renderPricing() {
     const buildCoinCard = (pkg, { showFeatures = false } = {}) => {
         const noteText = t(`pricing.notes.${pkg.id}`);
         const showNote = noteText && !noteText.startsWith('pricing.notes.');
-        const nudgeKey = `pricing.nudge.${pkg.id}`;
-        const upsellKey = `pricing.upsell.${pkg.id}`;
-        const nudgeText = pkg.showNudge ? t(nudgeKey) : '';
-        const upsellText = pkg.showUpsell ? t(upsellKey) : '';
-        const showNudge = nudgeText && !nudgeText.startsWith('pricing.nudge.');
-        const showUpsell = upsellText && !upsellText.startsWith('pricing.upsell.');
-        const perCoin = Math.round(pkg.amount / pkg.coins);
         const featuresHtml = showFeatures ? `
             <ul class="pkg-features">
                 <li><span class="check-icon">✓</span> ${t('pricing.instant_credit')}</li>
@@ -1391,19 +1394,15 @@ function renderPricing() {
                 <li><span class="check-icon">✓</span> ${t('pricing.no_expiry')}</li>
             </ul>` : '';
         return `
-        <div class="price-card price-card--coin${pkg.featured ? ' featured price-card--deal' : ''}${pkg.dimmed ? ' price-card--dim' : ''}">
-            ${pkg.featured ? `<div class="featured-badge">${t('pricing.best_choice_badge')}</div>` : ''}
+        <div class="price-card price-card--coin${pkg.featured ? ' featured' : ''}">
+            ${pkg.featured ? `<div class="featured-badge">🔥 ${t('pricing.featured_hot')}</div>` : ''}
             <div class="price-card-note">${showNote ? noteText : '&#8203;'}</div>
-            ${showNudge ? `<div class="price-card-nudge">${nudgeText}</div>` : ''}
-            ${showUpsell ? `<div class="price-card-upsell">${upsellText}</div>` : ''}
             <div class="coin-amount-display">
                 ${coinIcon}
                 <span class="coin-amount-num">${pkg.coins}</span>
             </div>
             <div class="price-card-bonus-hint${pkg.hasBonus ? '' : ' price-card-bonus-hint--empty'}">${t('pricing.bonus_included_note')}</div>
             <div class="price-value">${pkg.price}</div>
-            ${showNudge ? `<div class="price-card-per-coin price-card-per-coin--weak">${t('pricing.per_coin', { amount: perCoin.toLocaleString('vi-VN') })}</div>` : ''}
-            ${showUpsell ? `<div class="price-card-per-coin price-card-per-coin--strong">${t('pricing.per_coin', { amount: perCoin.toLocaleString('vi-VN') })}</div>` : ''}
             ${featuresHtml}
             <div class="pricing-pay-actions">
                 <button type="button" class="pricing-pay-btn pricing-pay-btn--vietqr" onclick="window.selectTopup('${pkg.id}')">
@@ -1781,27 +1780,11 @@ window.openOrderModal = () => {
 
 function updateFirstOrderUI() {
     const costEl = document.getElementById('submit-cost');
-    const offerBanner = document.getElementById('first-order-offer-banner');
-    const guestOfferBar = document.getElementById('guest-offer-bar');
     const promo = getDailyPromoStatus(FB_CACHE.myOrders || []);
     dailyPromoRemaining = promo.remainingToday;
 
-    const showOffer = (!currentUser || promo.canUsePromo) && !sessionStorage.getItem('offer_bar_dismissed');
-
-    if (offerBanner) offerBanner.style.display = promo.canUsePromo ? 'block' : 'none';
-    if (guestOfferBar) guestOfferBar.style.display = showOffer ? 'block' : 'none';
-
     const modelGroupEl = document.getElementById('model-selection-group');
     if (modelGroupEl) modelGroupEl.style.display = 'block';
-
-    const promoNoteEl = document.getElementById('daily-promo-note');
-    if (promoNoteEl) {
-        promoNoteEl.style.display = currentUser && promo.canUsePromo ? 'block' : 'none';
-        promoNoteEl.innerHTML = t('dashboard.daily_promo_note', {
-            remaining: promo.remainingToday,
-            max: DAILY_PROMO_PER_DAY
-        });
-    }
 
     if (costEl) {
         const submitBtn = document.getElementById('order-submit-btn');
@@ -1811,34 +1794,15 @@ function updateFirstOrderUI() {
         const modelKey = checkedModel ? checkedModel.value : 'fast';
         const baseCost = localizedModel(modelKey)?.cost ?? 10;
 
-        if (promo.canUsePromo) {
-            costEl.innerText = String(DAILY_PROMO_COST);
-            if (submitBtn) submitBtn.classList.add('btn-first-offer');
-            if (submitText) submitText.innerText = t('dashboard.daily_promo_cta', { remaining: promo.remainingToday });
-            if (summaryEl) {
-                summaryEl.innerHTML = t('dashboard.daily_promo_summary', {
-                    remaining: promo.remainingToday,
-                    max: DAILY_PROMO_PER_DAY
-                });
-                summaryEl.style.color = 'var(--primary)';
-            }
-        } else {
-            costEl.innerText = String(baseCost);
-            if (submitBtn) submitBtn.classList.remove('btn-first-offer');
-            if (submitText) submitText.innerText = t('hero.cta_create');
-            if (summaryEl) {
-                summaryEl.innerText = t(`modals.model_${modelKey}_desc`);
-                summaryEl.style.color = '';
-            }
+        costEl.innerText = promo.canUsePromo ? String(DAILY_PROMO_COST) : String(baseCost);
+        if (submitBtn) submitBtn.classList.remove('btn-first-offer');
+        if (submitText) submitText.innerText = t('hero.cta_create');
+        if (summaryEl) {
+            summaryEl.innerText = t(`modals.model_${modelKey}_desc`);
+            summaryEl.style.color = '';
         }
     }
 }
-
-window.closeOfferBar = () => {
-    const bar = document.getElementById('guest-offer-bar');
-    if (bar) bar.style.display = 'none';
-    sessionStorage.setItem('offer_bar_dismissed', 'true');
-};
 
 window.niceConfirm = ({ title, message, icon, onConfirm }) => {
     document.getElementById('confirm-title').innerText = title;

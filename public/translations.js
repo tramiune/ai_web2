@@ -183,23 +183,15 @@ window.TRANSLATIONS = {
             no_expiry: "Coin không hết hạn",
             bonus_included_note: "(Đã bao gồm số lượng tặng)",
             featured_hot: "Hot",
-            best_choice_badge: "Nên chọn",
-            per_coin: "~{amount}đ/coin",
             start_now: "Bắt đầu ngay",
             pay_vietqr: "Chuyển khoản",
             pay_vietqr_sub: "",
             pay_intl: "Thẻ quốc tế",
             notes: {
-                starter_v2: "Gói thử · ít coin",
+                starter_v2: "Gói giới hạn",
                 creator: "Tặng 50 Coin",
                 studio: "Tặng 300 Coin",
                 "pro-studio": "Tặng 600 Coin"
-            },
-            nudge: {
-                starter_v2: "Chỉ thêm 20k → Creator 100 coin, hời gấp đôi (~1.000đ/coin)"
-            },
-            upsell: {
-                creator: "Chỉ +20k so với gói 80k · nhận 100 coin + tặng 50"
             },
             packages: {
                 starter_v2: "Starter",
@@ -272,11 +264,11 @@ window.TRANSLATIONS = {
             action_view: "🔍 Xem",
             action_view_details: "Xem chi tiết",
             first_order_offer_title: "Ưu đãi mỗi ngày 🎁",
-            first_order_offer_desc: "Mỗi ngày <b>3 video</b> chỉ <b>1 Coin/video</b>. Hết lượt trong ngày sẽ tính giá thường. <b>Reset lúc 0h</b> (giờ Việt Nam).",
+            first_order_offer_desc: "Mỗi ngày <b>1 video</b> chỉ <b>1 Coin (~1.000đ)</b>. Tối đa <b>3 lần</b> trên mỗi tài khoản. Hết lượt trong ngày chờ <b>0h</b> (giờ VN).",
             first_order_offer_cta: "Dùng ngay",
-            daily_promo_note: "Hôm nay còn <b>{remaining}/{max}</b> lượt giá 1 Coin (reset 0h)",
+            daily_promo_note: "Ưu đãi 1 Coin: còn <b>{remaining}/{max}</b> lượt · 1 lượt/ngày",
             daily_promo_cta: "Tạo video (1 Coin · còn {remaining} lượt)",
-            daily_promo_summary: "Ưu đãi hôm nay: còn {remaining}/{max} lượt · 1 Coin/video · reset 0h",
+            daily_promo_summary: "Ưu đãi 1 Coin: còn {remaining}/{max} lượt · 1 lượt/ngày",
             maintenance_msg: "Hệ thống đang bảo trì định kỳ từ 00:30 đến 07:00. Các đơn hàng trong thời gian này sẽ được xử lý sau 07:00 sáng.",
             delay_note: "💬 Đơn hàng đang được điều phối xử lý, bạn vui lòng đợi thêm chút nhé!",
             download_btn: "📥 Tải về",
@@ -823,23 +815,15 @@ window.TRANSLATIONS = {
             no_expiry: "Coins never expire",
             bonus_included_note: "(Bonus coins included)",
             featured_hot: "Hot",
-            best_choice_badge: "Best choice",
-            per_coin: "~{amount} VND/coin",
             start_now: "Get Started",
             pay_vietqr: "Bank transfer",
             pay_vietqr_sub: "",
             pay_intl: "Intl card",
             notes: {
-                starter_v2: "Trial pack · fewer coins",
+                starter_v2: "Limited package",
                 creator: "Bonus 50 Coins",
                 studio: "Bonus 300 Coins",
                 "pro-studio": "Bonus 600 Coins"
-            },
-            nudge: {
-                starter_v2: "Just +20k more → Creator 100 coins, 2× better value (~1,000 VND/coin)"
-            },
-            upsell: {
-                creator: "Only +20k vs 80k pack · get 100 coins + 50 bonus"
             },
             packages: {
                 starter_v2: "Starter",
@@ -912,11 +896,11 @@ window.TRANSLATIONS = {
             action_view: "🔍 View",
             action_view_details: "View Details",
             first_order_offer_title: "Daily deal 🎁",
-            first_order_offer_desc: "<b>3 videos/day</b> at <b>1 Coin each</b>. Resets at <b>midnight</b> (Vietnam time).",
+            first_order_offer_desc: "<b>1 video/day</b> at <b>1 Coin (~1,000 VND)</b>. Max <b>3 times</b> per account. Resets at <b>midnight</b> (VN time).",
             first_order_offer_cta: "Use now",
-            daily_promo_note: "Today: <b>{remaining}/{max}</b> slots at 1 Coin (resets at midnight)",
+            daily_promo_note: "1 Coin deal: <b>{remaining}/{max}</b> slots left · 1/day",
             daily_promo_cta: "Create video (1 Coin · {remaining} left)",
-            daily_promo_summary: "Today's deal: {remaining}/{max} slots · 1 Coin/video · resets at midnight",
+            daily_promo_summary: "1 Coin deal: {remaining}/{max} slots left · 1/day",
             maintenance_msg: "System is under scheduled maintenance from 00:30 to 07:00. Orders during this time will be processed after 07:00 AM.",
             delay_note: "💬 Your order is being dispatched for processing, please wait a moment!",
             download_btn: "📥 Download",
