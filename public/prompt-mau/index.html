@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gợi ý prompt mẫu thời trang - Nhay Cloud</title>
+    <meta name="description" content="49 prompt mẫu tạo video thời trang AI — copy nhanh để dùng trên Nhay Cloud.">
+    <link rel="stylesheet" href="../style.css">
+    <link rel="icon" href="../favicon.png">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Outfit:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        .prompt-page {
+            padding: 100px 20px 80px;
+            max-width: 860px;
+            margin: 0 auto;
+        }
+
+        .prompt-hero {
+            text-align: center;
+            margin-bottom: 1.5rem;
+        }
+
+        .prompt-hero h1 {
+            font-family: 'Outfit', sans-serif;
+            font-size: clamp(1.7rem, 5vw, 2.2rem);
+            margin: 0 0 0.75rem;
+            background: linear-gradient(135deg, #fff 0%, #c084fc 50%, #00f2fe 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .prompt-hero p {
+            opacity: 0.78;
+            font-size: 1rem;
+            line-height: 1.6;
+            margin: 0;
+        }
+
+        .prompt-toolbar {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.65rem;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 1rem;
+        }
+
+        .prompt-count {
+            font-size: 0.88rem;
+            opacity: 0.7;
+        }
+
+        .prompt-list {
+            display: flex;
+            flex-direction: column;
+            gap: 0.65rem;
+            max-height: 70vh;
+            overflow-y: auto;
+            padding-right: 0.25rem;
+        }
+
+        .prompt-list::-webkit-scrollbar { width: 5px; }
+        .prompt-list::-webkit-scrollbar-thumb { background: #555; border-radius: 4px; }
+
+        .prompt-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 0.75rem;
+            padding: 0.85rem 1rem;
+            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        .prompt-num {
+            flex-shrink: 0;
+            width: 1.75rem;
+            height: 1.75rem;
+            border-radius: 999px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.72rem;
+            font-weight: 700;
+            color: #00f2fe;
+            background: rgba(0, 242, 254, 0.1);
+            border: 1px solid rgba(0, 242, 254, 0.25);
+        }
+
+        .prompt-text {
+            flex: 1;
+            font-size: 0.92rem;
+            line-height: 1.55;
+            opacity: 0.92;
+            word-break: break-word;
+        }
+
+        .btn-copy-prompt {
+            flex-shrink: 0;
+            padding: 0.4rem 0.75rem;
+            font-size: 0.78rem;
+            border-radius: 8px;
+            border: 1px solid rgba(168, 85, 247, 0.35);
+            background: rgba(168, 85, 247, 0.12);
+            color: #e9d5ff;
+            cursor: pointer;
+            white-space: nowrap;
+        }
+
+        .btn-copy-prompt:hover { background: rgba(168, 85, 247, 0.22); }
+        .btn-copy-prompt.copied { border-color: #28a745; color: #28a745; background: rgba(40, 167, 69, 0.12); }
+
+        .prompt-loading, .prompt-error {
+            text-align: center;
+            padding: 2rem;
+            opacity: 0.75;
+        }
+
+        .prompt-footer {
+            margin-top: 1.5rem;
+            text-align: center;
+        }
+
+        .prompt-footer a {
+            color: #00f2fe;
+            font-weight: 600;
+            font-size: 0.9rem;
+        }
+    </style>
+</head>
+<body class="privacy-page">
+    <nav class="navbar">
+        <div class="nav-container">
+            <a href="../index.html" class="logo">
+                <img src="../icon-64.png" alt="Nhay Cloud" class="logo-img" width="32" height="32" decoding="async">
+                <span class="logo-text">Nhay Cloud</span>
+            </a>
+            <a href="../index.html" class="auth-btn">Về trang chủ</a>
+        </div>
+    </nav>
+
+    <main class="prompt-page">
+        <div class="prompt-hero">
+            <h1>Gợi ý prompt mẫu thời trang</h1>
+            <p>49 câu lệnh mẫu cho video review thời trang — bấm Copy hoặc Copy tất cả rồi dán vào ô prompt khi tạo video.</p>
+        </div>
+
+        <div class="glass-card" style="padding: 1.25rem 1.25rem 1rem;">
+            <div class="prompt-toolbar">
+                <span class="prompt-count" id="promptCount">Đang tải...</span>
+                <button type="button" class="btn-primary" id="copyAllBtn" style="padding: 0.55rem 1rem; font-size: 0.85rem;" disabled>
+                    Copy tất cả
+                </button>
+            </div>
+            <div id="promptListContainer" class="prompt-list">
+                <div class="prompt-loading">Đang tải danh sách prompt...</div>
+            </div>
+        </div>
+
+        <div class="prompt-footer">
+            <a href="/js/promt-review-list-vn.txt" download="promt-review-list-vn.txt">Tải file .txt</a>
+            &nbsp;·&nbsp;
+            <a href="../index.html">Tạo video ngay →</a>
+        </div>
+    </main>
+
+    <footer style="text-align: center; padding: 2rem; opacity: 0.5; font-size: 0.85rem;">
+        &copy; 2026 Nhay Cloud
+    </footer>
+
+    <script>
+        let allPrompts = [];
+
+        function copyText(text, btn) {
+            navigator.clipboard.writeText(text).then(() => {
+                if (!btn) return;
+                const original = btn.textContent;
+                btn.textContent = 'Đã copy';
+                btn.classList.add('copied');
+                setTimeout(() => {
+                    btn.textContent = original;
+                    btn.classList.remove('copied');
+                }, 1800);
+            }).catch(() => alert('Không copy được. Bạn thử chọn text và copy thủ công nhé.'));
+        }
+
+        function renderPrompts(lines) {
+            allPrompts = lines;
+            const container = document.getElementById('promptListContainer');
+            const countEl = document.getElementById('promptCount');
+            const copyAllBtn = document.getElementById('copyAllBtn');
+
+            container.innerHTML = '';
+            countEl.textContent = lines.length + ' prompt';
+            copyAllBtn.disabled = false;
+
+            lines.forEach((line, i) => {
+                const item = document.createElement('div');
+                item.className = 'prompt-item';
+
+                const num = document.createElement('span');
+                num.className = 'prompt-num';
+                num.textContent = i + 1;
+
+                const text = document.createElement('div');
+                text.className = 'prompt-text';
+                text.textContent = line;
+
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = 'btn-copy-prompt';
+                btn.textContent = 'Copy';
+                btn.addEventListener('click', () => copyText(line, btn));
+
+                item.append(num, text, btn);
+                container.appendChild(item);
+            });
+        }
+
+        document.getElementById('copyAllBtn').addEventListener('click', () => {
+            copyText(allPrompts.join('\n'), document.getElementById('copyAllBtn'));
+        });
+
+        fetch('/js/promt-review-list-vn.txt')
+            .then(r => {
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                return r.arrayBuffer();
+            })
+            .then(buf => new TextDecoder('utf-8').decode(buf))
+            .then(text => {
+                const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+                if (!lines.length) throw new Error('empty');
+                renderPrompts(lines);
+            })
+            .catch(() => {
+                document.getElementById('promptListContainer').innerHTML =
+                    '<div class="prompt-error">Không tải được danh sách prompt. Thử tải file .txt bên dưới.</div>';
+                document.getElementById('promptCount').textContent = 'Lỗi tải';
+            });
+    </script>
+</body>
+</html>

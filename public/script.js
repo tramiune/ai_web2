@@ -166,6 +166,51 @@ let currentUser = null;
 let selectedTopupPackage = null;
 let isFirstTimeUser = false; // Flag for special offer (0 or 1 order)
 let orderCount = 0; // Track total orders
+let dailyPromoRemaining = 0; // Số lượt 1 coin còn lại trong ngày (VN, reset 0h)
+
+/** Ưu đãi: tối đa 3 video/ngày giá 1 coin, reset lúc 0h (Asia/Ho_Chi_Minh). */
+const DAILY_PROMO_COST = 1;
+const DAILY_PROMO_PER_DAY = 3;
+const VN_TIMEZONE = 'Asia/Ho_Chi_Minh';
+
+function getVnDateString(date = new Date()) {
+    return new Intl.DateTimeFormat('en-CA', { timeZone: VN_TIMEZONE }).format(date);
+}
+
+function getDailyPromoStatus(orders = []) {
+    const today = getVnDateString();
+    const todayCount = orders.filter((o) => o.dailyPromo === true && o.promoDate === today).length;
+    const remainingToday = Math.max(0, DAILY_PROMO_PER_DAY - todayCount);
+    return {
+        today,
+        todayCount,
+        remainingToday,
+        canUsePromo: remainingToday > 0
+    };
+}
+
+async function resolvePromoCostInTransaction(transaction, db, uid, baseCost) {
+    const { collection, query, where } = window.firebase;
+    const promoQuery = query(
+        collection(db, 'orders'),
+        where('userId', '==', uid),
+        where('dailyPromo', '==', true)
+    );
+    const snap = await transaction.get(promoQuery);
+    const today = getVnDateString();
+    let todayCount = 0;
+    snap.forEach((docSnap) => {
+        if (docSnap.data().promoDate === today) todayCount += 1;
+    });
+    if (todayCount >= DAILY_PROMO_PER_DAY) {
+        return { cost: baseCost, isPromo: false, remainingToday: 0 };
+    }
+    return {
+        cost: DAILY_PROMO_COST,
+        isPromo: true,
+        remainingToday: DAILY_PROMO_PER_DAY - todayCount
+    };
+}
 let initialCoinsBeforeTopup = 0; // Để theo dõi số dư trước khi nạp
 let referralEarningsUnsubscribe = null; // Cleanup handle for referralEarnings onSnapshot (legacy - giờ dùng FB_LISTENERS)
 let referralCurrentCode = null; // User's referral code, populated when opening referral page
@@ -1127,7 +1172,7 @@ function handleUserLoggedOut() {
     // Legacy var (giờ đã unsub trong fbUnsubAll, để null cho an toàn)
     referralEarningsUnsubscribe = null;
 
-    isFirstTimeUser = false;
+    dailyPromoRemaining = 0;
     updateFirstOrderUI();
 
     // Home = My videos (dashboard sẽ hiện placeholder login-required)
@@ -1726,16 +1771,24 @@ function updateFirstOrderUI() {
     const costEl = document.getElementById('submit-cost');
     const offerBanner = document.getElementById('first-order-offer-banner');
     const guestOfferBar = document.getElementById('guest-offer-bar');
-    
-    const showOffer = (!currentUser || isFirstTimeUser) && !sessionStorage.getItem('offer_bar_dismissed');
-    console.log("🎁 updateFirstOrderUI: showOffer =", showOffer, "(isFirstTimeUser:", isFirstTimeUser, ")");
-    
-    if (offerBanner) offerBanner.style.display = isFirstTimeUser ? 'block' : 'none';
+    const promo = getDailyPromoStatus(FB_CACHE.myOrders || []);
+    dailyPromoRemaining = promo.remainingToday;
+
+    const showOffer = (!currentUser || promo.canUsePromo) && !sessionStorage.getItem('offer_bar_dismissed');
+
+    if (offerBanner) offerBanner.style.display = promo.canUsePromo ? 'block' : 'none';
     if (guestOfferBar) guestOfferBar.style.display = showOffer ? 'block' : 'none';
-    
+
     const modelGroupEl = document.getElementById('model-selection-group');
-    if (modelGroupEl) {
-        modelGroupEl.style.display = isFirstTimeUser ? 'none' : 'block';
+    if (modelGroupEl) modelGroupEl.style.display = 'block';
+
+    const promoNoteEl = document.getElementById('daily-promo-note');
+    if (promoNoteEl) {
+        promoNoteEl.style.display = currentUser && promo.canUsePromo ? 'block' : 'none';
+        promoNoteEl.innerHTML = t('dashboard.daily_promo_note', {
+            remaining: promo.remainingToday,
+            max: DAILY_PROMO_PER_DAY
+        });
     }
 
     if (costEl) {
@@ -1744,21 +1797,21 @@ function updateFirstOrderUI() {
         const summaryEl = document.getElementById('submit-summary-line');
         const checkedModel = document.querySelector('input[name="model-type"]:checked');
         const modelKey = checkedModel ? checkedModel.value : 'fast';
+        const baseCost = localizedModel(modelKey)?.cost ?? 10;
 
-        if (orderCount === 0) {
-            // First order: 1 Coin
-            costEl.innerText = '1';
+        if (promo.canUsePromo) {
+            costEl.innerText = String(DAILY_PROMO_COST);
             if (submitBtn) submitBtn.classList.add('btn-first-offer');
-            if (submitText) submitText.innerText = t('dashboard.first_order_cta_vnd');
+            if (submitText) submitText.innerText = t('dashboard.daily_promo_cta', { remaining: promo.remainingToday });
             if (summaryEl) {
-                summaryEl.innerText = t(`modals.model_${modelKey}_desc`);
-                summaryEl.style.color = '';
+                summaryEl.innerHTML = t('dashboard.daily_promo_summary', {
+                    remaining: promo.remainingToday,
+                    max: DAILY_PROMO_PER_DAY
+                });
+                summaryEl.style.color = 'var(--primary)';
             }
         } else {
-            // Regular pricing
-            if (localizedModel(modelKey)) {
-                costEl.innerText = localizedModel(modelKey).cost;
-            }
+            costEl.innerText = String(baseCost);
             if (submitBtn) submitBtn.classList.remove('btn-first-offer');
             if (submitText) submitText.innerText = t('hero.cta_create');
             if (summaryEl) {
@@ -2037,18 +2090,23 @@ async function setupEventListeners() {
                 const userRef = doc(db, "users", currentUser.uid);
                 const userSnap = await runTransaction(db, async (transaction) => {
                     const userDoc = await transaction.get(userRef);
+                    if (!userDoc.exists()) throw t('common.error');
+
                     const modelKey = modelKeySelected;
                     const serviceType = document.querySelector('input[name="service-type"]:checked').value;
                     let model = { ...localizedModel(modelKey) };
                     if (modelIdOverride) model.modelId = modelIdOverride;
 
-                    // Apply First Order Offer: 1 Coin
-                    if (orderCount === 0) {
-                        model.cost = 1;
-                        console.log("🎁 Áp dụng ưu đãi 1 Coin cho đơn hàng đầu tiên!");
+                    const promo = await resolvePromoCostInTransaction(
+                        transaction, db, currentUser.uid, model.cost
+                    );
+                    model.cost = promo.cost;
+                    model.dailyPromo = promo.isPromo;
+                    if (promo.isPromo) {
+                        console.log(`🎁 Ưu đãi ngày: ${promo.remainingToday} lượt còn lại @ ${DAILY_PROMO_COST} coin`);
                     }
 
-                    if (userDoc.data().coins < model.cost) {
+                    if ((userDoc.data().coins || 0) < model.cost) {
                         throw t('modals.insufficient_coins_title');
                     }
                     return { currentCoins: userDoc.data().coins, model, serviceType };
@@ -2094,25 +2152,39 @@ async function setupEventListeners() {
                             // 3. Finalize Transaction (Deduct coins and create order)
                             const orderId = await runTransaction(db, async (transaction) => {
                                 const userDoc = await transaction.get(userRef);
-                                const currentCoins = userDoc.data().coins;
+                                if (!userDoc.exists()) throw t('common.error');
+
+                                const modelKey = modelKeySelected;
+                                let baseModel = { ...localizedModel(modelKey) };
+                                if (modelIdOverride) baseModel.modelId = modelIdOverride;
+
+                                const promo = await resolvePromoCostInTransaction(
+                                    transaction, db, currentUser.uid, baseModel.cost
+                                );
+                                const finalCost = promo.cost;
+                                const isDailyPromo = promo.isPromo;
+                                const currentCoins = userDoc.data().coins || 0;
+
+                                if (currentCoins < finalCost) {
+                                    throw t('modals.insufficient_coins_title');
+                                }
 
                                 const aspectRatioEl = document.querySelector('input[name="aspect-ratio"]:checked');
                                 const aspectRatio = aspectRatioEl ? aspectRatioEl.value : '16:9';
 
-                                if (model.cost > 0) {
-                                    transaction.update(userRef, { coins: currentCoins - model.cost });
+                                if (finalCost > 0) {
+                                    transaction.update(userRef, { coins: currentCoins - finalCost });
                                 }
 
-                                const orderRef = doc(collection(db, "orders"));
-                                transaction.set(orderRef, {
+                                const orderPayload = {
                                     userId: currentUser.uid,
                                     userEmail: currentUser.email,
                                     userName: currentUser.displayName,
-                                    packageName: model.name,
-                                    modelId: model.modelId,
+                                    packageName: baseModel.name,
+                                    modelId: baseModel.modelId,
                                     serviceType: serviceType,
                                     serviceLabel: SERVICE_TYPE_MAP()[serviceType] || serviceType,
-                                    costCoins: model.cost,
+                                    costCoins: finalCost,
                                     characterImageLink: charUrl,
                                     referenceVideoLink: videoUrl,
                                     aspectRatio: aspectRatio,
@@ -2121,7 +2193,14 @@ async function setupEventListeners() {
                                     adminNote: "",
                                     createdAt: serverTimestamp(),
                                     updatedAt: serverTimestamp()
-                                });
+                                };
+                                if (isDailyPromo) {
+                                    orderPayload.dailyPromo = true;
+                                    orderPayload.promoDate = getVnDateString();
+                                }
+
+                                const orderRef = doc(collection(db, "orders"));
+                                transaction.set(orderRef, orderPayload);
                                 return orderRef.id;
                             });
 
@@ -2146,9 +2225,7 @@ async function setupEventListeners() {
                                 content_name: serviceLabelPixel
                             });
 
-                            // Update order state for immediate UI feedback
                             orderCount++;
-                            isFirstTimeUser = orderCount < 2;
                             updateFirstOrderUI();
 
                             document.getElementById('order-form').reset();
@@ -2264,9 +2341,10 @@ function loadMyOrders() {
         // Cache snapshot data
         FB_CACHE.myOrders = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
 
-        isFirstTimeUser = snapshot.size === 0;
         orderCount = snapshot.size;
-        console.log("🔍 loadMyOrders: orderCount =", orderCount, "=> isFirstTimeUser =", isFirstTimeUser);
+        const promo = getDailyPromoStatus(FB_CACHE.myOrders);
+        dailyPromoRemaining = promo.remainingToday;
+        console.log("🔍 loadMyOrders: orderCount =", orderCount, "dailyPromo remaining =", dailyPromoRemaining);
         updateFirstOrderUI();
 
         renderMyOrders();
@@ -4042,7 +4120,7 @@ window.createVideoWithModel = (modelId) => {
 const REFERRAL_COMMISSION_RATE = 0.10;
 const REFERRAL_CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no 0/O/1/I to avoid confusion
 const REFERRAL_CODE_LENGTH = 8;
-const VND_PER_COIN_FALLBACK = 2000; // gói Starter: 40.000đ / 20 coin
+const VND_PER_COIN_FALLBACK = 2000; // gói Starter: 60.000đ / 30 coin
 
 function computeReferralCommissionAmount(baseAmount, currency) {
     if (!baseAmount || baseAmount <= 0) return 0;

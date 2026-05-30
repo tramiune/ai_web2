@@ -82,7 +82,25 @@ export default {
       return new Response(upstream.body, { status: 200, headers });
     }
 
-    // Not an API route - let Cloudflare Assets serve static files.
+    // Static assets from public/ (with charset fix for prompt txt)
+    if (env.ASSETS) {
+      const assetResponse = await env.ASSETS.fetch(request);
+      if (assetResponse.status !== 404) {
+        if (url.pathname === '/js/promt-review-list-vn.txt') {
+          const text = await assetResponse.text();
+          return new Response(text, {
+            status: 200,
+            headers: {
+              'Content-Type': 'text/plain; charset=utf-8',
+              'Cache-Control': 'public, max-age=86400',
+              'Access-Control-Allow-Origin': '*'
+            }
+          });
+        }
+        return assetResponse;
+      }
+    }
+
     return new Response('Not Found', { status: 404 });
   }
 };
