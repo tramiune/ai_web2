@@ -195,30 +195,16 @@ function getDailyPromoStatus(orders = []) {
     };
 }
 
-async function resolvePromoCostInTransaction(transaction, db, uid, baseCost) {
-    const { collection, query, where } = window.firebase;
-    const promoQuery = query(
-        collection(db, 'orders'),
-        where('userId', '==', uid),
-        where('dailyPromo', '==', true)
-    );
-    const snap = await transaction.get(promoQuery);
-    const today = getVnDateString();
-    let todayCount = 0;
-    let totalCount = 0;
-    snap.forEach((docSnap) => {
-        totalCount += 1;
-        if (docSnap.data().promoDate === today) todayCount += 1;
-    });
-    const remainingTotal = Math.max(0, DAILY_PROMO_MAX_TOTAL - totalCount);
-    if (remainingTotal <= 0 || todayCount >= DAILY_PROMO_PER_DAY) {
-        return { cost: baseCost, isPromo: false, remainingToday: 0, remainingTotal };
+function resolvePromoCost(orders, baseCost) {
+    const promo = getDailyPromoStatus(orders);
+    if (!promo.canUsePromo) {
+        return { cost: baseCost, isPromo: false, remainingToday: 0, remainingTotal: promo.remainingTotal };
     }
     return {
         cost: DAILY_PROMO_COST,
         isPromo: true,
         remainingToday: 1,
-        remainingTotal: remainingTotal - 1
+        remainingTotal: promo.remainingTotal - 1
     };
 }
 let initialCoinsBeforeTopup = 0; // Để theo dõi số dư trước khi nạp
@@ -1809,11 +1795,19 @@ function updateFirstOrderUI() {
 }
 
 window.niceConfirm = ({ title, message, icon, onConfirm }) => {
-    document.getElementById('confirm-title').innerText = title;
-    document.getElementById('confirm-msg').innerHTML = message; // Changed to innerHTML to support <br> and <i>
-    document.getElementById('confirm-icon').innerText = icon || '❓';
-
+    const titleEl = document.getElementById('confirm-title');
+    const msgEl = document.getElementById('confirm-msg');
+    const iconEl = document.getElementById('confirm-icon');
     const yesBtn = document.getElementById('confirm-yes-btn');
+    if (!titleEl || !msgEl || !iconEl || !yesBtn) {
+        if (onConfirm) onConfirm();
+        return;
+    }
+
+    titleEl.innerText = title;
+    msgEl.innerHTML = message;
+    iconEl.innerText = icon || '❓';
+
     const newBtn = yesBtn.cloneNode(true);
     yesBtn.parentNode.replaceChild(newBtn, yesBtn);
 
@@ -2024,12 +2018,16 @@ async function setupEventListeners() {
             const { db, doc, collection, runTransaction, serverTimestamp } = window.firebase;
             const submitBtn = document.getElementById('order-submit-btn');
             const progressDiv = document.getElementById('upload-progress');
+            if (!submitBtn || !progressDiv) {
+                return showToast(t('common.error'));
+            }
 
             try {
-                const charFile = document.getElementById('file-char').files[0];
-                const videoFile = document.getElementById('file-video').files[0];
-                const templateUrl = document.getElementById('selected-template-url').value;
+                const charFile = document.getElementById('file-char')?.files?.[0];
+                const videoFile = document.getElementById('file-video')?.files?.[0];
+                const templateUrl = document.getElementById('selected-template-url')?.value || '';
                 const modelKeySelected = document.querySelector('input[name="model-type"]:checked')?.value || 'fast';
+                const serviceType = document.querySelector('input[name="service-type"]:checked')?.value || 'motion-to-char';
                 let modelIdOverride = null;
 
                 // Model thường: auto select Aidancing id by uploaded video duration
@@ -2068,28 +2066,28 @@ async function setupEventListeners() {
 
                 // 1. Check coins first (Transaction)
                 const userRef = doc(db, "users", currentUser.uid);
+                const cachedOrders = FB_CACHE.myOrders || [];
                 const userSnap = await runTransaction(db, async (transaction) => {
                     const userDoc = await transaction.get(userRef);
                     if (!userDoc.exists()) throw t('common.error');
 
                     const modelKey = modelKeySelected;
-                    const serviceType = document.querySelector('input[name="service-type"]:checked').value;
-                    let model = { ...localizedModel(modelKey) };
+                    const baseModel = localizedModel(modelKey) || localizedModel('fast');
+                    let model = { ...baseModel };
                     if (modelIdOverride) model.modelId = modelIdOverride;
 
-                    const promo = await resolvePromoCostInTransaction(
-                        transaction, db, currentUser.uid, model.cost
-                    );
+                    const promo = resolvePromoCost(cachedOrders, model.cost);
                     model.cost = promo.cost;
                     model.dailyPromo = promo.isPromo;
                     if (promo.isPromo) {
                         console.log(`🎁 Ưu đãi ngày: ${promo.remainingToday} lượt còn lại @ ${DAILY_PROMO_COST} coin`);
                     }
 
-                    if ((userDoc.data().coins || 0) < model.cost) {
+                    const userData = userDoc.data() || {};
+                    if ((userData.coins || 0) < model.cost) {
                         throw t('modals.insufficient_coins_title');
                     }
-                    return { currentCoins: userDoc.data().coins, model, serviceType };
+                    return { currentCoins: userData.coins, model, serviceType };
                 });
 
                 const { model, serviceType } = userSnap;
@@ -2135,15 +2133,15 @@ async function setupEventListeners() {
                                 if (!userDoc.exists()) throw t('common.error');
 
                                 const modelKey = modelKeySelected;
-                                let baseModel = { ...localizedModel(modelKey) };
-                                if (modelIdOverride) baseModel.modelId = modelIdOverride;
+                                const baseModel = localizedModel(modelKey) || localizedModel('fast');
+                                let orderModel = { ...baseModel };
+                                if (modelIdOverride) orderModel.modelId = modelIdOverride;
 
-                                const promo = await resolvePromoCostInTransaction(
-                                    transaction, db, currentUser.uid, baseModel.cost
-                                );
+                                const promo = resolvePromoCost(cachedOrders, orderModel.cost);
                                 const finalCost = promo.cost;
                                 const isDailyPromo = promo.isPromo;
-                                const currentCoins = userDoc.data().coins || 0;
+                                const userData = userDoc.data() || {};
+                                const currentCoins = userData.coins || 0;
 
                                 if (currentCoins < finalCost) {
                                     throw t('modals.insufficient_coins_title');
@@ -2160,8 +2158,8 @@ async function setupEventListeners() {
                                     userId: currentUser.uid,
                                     userEmail: currentUser.email,
                                     userName: currentUser.displayName,
-                                    packageName: baseModel.name,
-                                    modelId: baseModel.modelId,
+                                    packageName: orderModel.name,
+                                    modelId: orderModel.modelId,
                                     serviceType: serviceType,
                                     serviceLabel: SERVICE_TYPE_MAP()[serviceType] || serviceType,
                                     costCoins: finalCost,
@@ -2254,7 +2252,8 @@ async function setupEventListeners() {
                         }
                     });
                 } else {
-                    showToast(t('common.error') + ": " + error);
+                    const errMsg = typeof error === 'string' ? error : (error?.message || String(error));
+                    showToast(t('common.error') + ": " + errMsg);
                 }
             } finally {
                 submitBtn.disabled = false;
