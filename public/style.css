@@ -601,22 +601,67 @@ button {
   letter-spacing: -0.5px;
 }
 
-.price-card--deal {
-  border: 2px solid #00f2fe;
-  background: linear-gradient(165deg, rgba(0, 242, 254, 0.08) 0%, rgba(168, 85, 247, 0.06) 100%);
-  box-shadow: 0 0 28px rgba(0, 242, 254, 0.18);
+.price-card--dim {
+  opacity: 0.72;
+  border-color: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.02);
+  transform: scale(0.98);
 }
 
-.price-card-compare {
+.price-card--dim:hover {
+  transform: scale(0.98);
+  box-shadow: none;
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.price-card--dim .coin-amount-num {
+  color: rgba(255, 255, 255, 0.75);
+}
+
+.price-card--dim .price-card-note {
+  color: rgba(255, 255, 255, 0.45);
+}
+
+.price-card-nudge {
   font-size: 0.72rem;
   line-height: 1.45;
-  color: #7ee8ff;
-  background: rgba(0, 242, 254, 0.08);
-  border: 1px solid rgba(0, 242, 254, 0.22);
+  color: rgba(255, 255, 255, 0.55);
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px dashed rgba(255, 255, 255, 0.12);
   border-radius: 8px;
   padding: 0.45rem 0.55rem;
   margin-bottom: 0.75rem;
   text-align: left;
+}
+
+.price-card-upsell {
+  font-size: 0.72rem;
+  line-height: 1.45;
+  color: #c4f8ff;
+  background: rgba(0, 242, 254, 0.1);
+  border: 1px solid rgba(0, 242, 254, 0.28);
+  border-radius: 8px;
+  padding: 0.45rem 0.55rem;
+  margin-bottom: 0.75rem;
+  text-align: left;
+  font-weight: 600;
+}
+
+.price-card-per-coin--weak {
+  color: rgba(255, 255, 255, 0.4);
+  text-decoration: line-through;
+  text-decoration-color: rgba(255, 100, 100, 0.5);
+}
+
+.price-card-per-coin--strong {
+  color: #5eead4;
+  font-weight: 700;
+}
+
+.price-card--deal {
+  border: 2px solid #00f2fe;
+  background: linear-gradient(165deg, rgba(0, 242, 254, 0.08) 0%, rgba(168, 85, 247, 0.06) 100%);
+  box-shadow: 0 0 28px rgba(0, 242, 254, 0.18);
 }
 
 .price-card-per-coin {

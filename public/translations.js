@@ -183,20 +183,23 @@ window.TRANSLATIONS = {
             no_expiry: "Coin không hết hạn",
             bonus_included_note: "(Đã bao gồm số lượng tặng)",
             featured_hot: "Hot",
-            deal_badge: "Siêu thịt",
+            best_choice_badge: "Nên chọn",
             per_coin: "~{amount}đ/coin",
             start_now: "Bắt đầu ngay",
             pay_vietqr: "Chuyển khoản",
             pay_vietqr_sub: "",
             pay_intl: "Thẻ quốc tế",
             notes: {
-                starter_v2: "40 coin · gấp đôi gói cũ",
+                starter_v2: "Gói thử · ít coin",
                 creator: "Tặng 50 Coin",
                 studio: "Tặng 300 Coin",
                 "pro-studio": "Tặng 600 Coin"
             },
-            compare: {
-                starter_v2: "Creator 100 coin = 100k — gói này 40 coin chỉ 80k, tiết kiệm 20k so với nạp lớn"
+            nudge: {
+                starter_v2: "Chỉ thêm 20k → Creator 100 coin, hời gấp đôi (~1.000đ/coin)"
+            },
+            upsell: {
+                creator: "Chỉ +20k so với gói 80k · nhận 100 coin + tặng 50"
             },
             packages: {
                 starter_v2: "Starter",
@@ -820,20 +823,23 @@ window.TRANSLATIONS = {
             no_expiry: "Coins never expire",
             bonus_included_note: "(Bonus coins included)",
             featured_hot: "Hot",
-            deal_badge: "Best deal",
+            best_choice_badge: "Best choice",
             per_coin: "~{amount} VND/coin",
             start_now: "Get Started",
             pay_vietqr: "Bank transfer",
             pay_vietqr_sub: "",
             pay_intl: "Intl card",
             notes: {
-                starter_v2: "40 coins · double the old pack",
+                starter_v2: "Trial pack · fewer coins",
                 creator: "Bonus 50 Coins",
                 studio: "Bonus 300 Coins",
                 "pro-studio": "Bonus 600 Coins"
             },
-            compare: {
-                starter_v2: "Creator: 100 coins for 100k — this pack: 40 coins for 80k, save 20k vs big top-up"
+            nudge: {
+                starter_v2: "Just +20k more → Creator 100 coins, 2× better value (~1,000 VND/coin)"
+            },
+            upsell: {
+                creator: "Only +20k vs 80k pack · get 100 coins + 50 bonus"
             },
             packages: {
                 starter_v2: "Starter",
