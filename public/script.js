@@ -2090,7 +2090,7 @@ async function setupEventListeners() {
                     return { currentCoins: userData.coins, model, serviceType };
                 });
 
-                const { model, serviceType } = userSnap;
+                const { model } = userSnap;
 
                 // 1b. Show Queue/Wait Time Confirmation
                 const minWait = Math.floor(Math.random() * (15 - 10 + 1)) + 10; // 10-15
