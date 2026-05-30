@@ -1795,8 +1795,12 @@ function updateFirstOrderUI() {
         const baseCost = localizedModel(modelKey)?.cost ?? 10;
 
         costEl.innerText = promo.canUsePromo ? String(DAILY_PROMO_COST) : String(baseCost);
-        if (submitBtn) submitBtn.classList.remove('btn-first-offer');
-        if (submitText) submitText.innerText = t('hero.cta_create');
+        if (submitBtn) submitBtn.classList.toggle('btn-first-offer', promo.canUsePromo);
+        if (submitText) {
+            submitText.innerText = promo.canUsePromo
+                ? t('dashboard.first_order_cta_vnd')
+                : t('hero.cta_create');
+        }
         if (summaryEl) {
             summaryEl.innerText = t(`modals.model_${modelKey}_desc`);
             summaryEl.style.color = '';

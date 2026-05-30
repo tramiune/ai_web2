@@ -273,7 +273,7 @@ window.TRANSLATIONS = {
             delay_note: "💬 Đơn hàng đang được điều phối xử lý, bạn vui lòng đợi thêm chút nhé!",
             download_btn: "📥 Tải về",
             orders_count: "{count} Videos",
-            first_order_cta_vnd: "Trải nghiệm ngay chỉ 1 Coin"
+            first_order_cta_vnd: "Thử ngay 1000đ"
         },
         modals: {
             topup_title: "Nạp Coin tự động",
@@ -905,7 +905,7 @@ window.TRANSLATIONS = {
             delay_note: "💬 Your order is being dispatched for processing, please wait a moment!",
             download_btn: "📥 Download",
             orders_count: "{count} Videos",
-            first_order_cta_vnd: "Try now for only 1 Coin"
+            first_order_cta_vnd: "Try now — 1,000đ"
         },
         modals: {
             topup_title: "Automated Top-up",
