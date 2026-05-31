@@ -180,6 +180,9 @@ class AidancingApiClient:
                         const vid = document.querySelector('video');
                         if (vid && vid.readyState >= 2 && vid.duration > 0)
                             return { ok: true, why: 'video-preview' };
+                        const inp = document.querySelector('input[name="video"]');
+                        if (inp && inp.files && inp.files.length > 0 && !btn?.disabled)
+                            return { ok: true, why: 'input-ready' };
                         return { ok: false, why: 'waiting' };
                     }"""
                 )
