@@ -282,3 +282,16 @@ sudo reboot
 ```
 
 Sau reboot: làm lại **mục 2** hoặc **mục 3**. Profile Chrome **không mất**; session Aidancing có thể còn hoặc cần login lại (mục 4).
+
+---
+
+## 11. Chạy song song web1 (MotionAI)
+
+Cùng VPS, bot web1 dùng port **9222** + profile **Profile 4** — xem hướng dẫn đầy đủ trong repo `ai_web/README.md`.
+
+Tóm tắt tmux web1:
+
+```bash
+tmux new-session -d -s chrome-motion "xvfb-run -a ... --remote-debugging-port=9222 ... --user-data-dir=\$HOME/.chrome-aidancing-motionai --profile-directory='Profile 4' ..."
+tmux new-session -d -s bot-motion "cd ~/ai_web && export BOT_CDP_URL=http://127.0.0.1:9222 && python3 bot.py --name motionai_vps_bot --mode api"
+```

@@ -2708,6 +2708,15 @@ window.changeAdminUserPage = (newPage) => {
 
 // ----- BOTS (Admin tab) -----
 const BOT_ONLINE_MS = 90 * 1000;
+let _renderAdminBotsTimer = null;
+
+function scheduleRenderAdminBots() {
+    if (_renderAdminBotsTimer) clearTimeout(_renderAdminBotsTimer);
+    _renderAdminBotsTimer = setTimeout(() => {
+        _renderAdminBotsTimer = null;
+        renderAdminBots();
+    }, 400);
+}
 
 function subscribeAdminBots() {
     if (!window.__isAdmin) return;
@@ -2720,7 +2729,7 @@ function subscribeAdminBots() {
     const { db, collection, onSnapshot } = window.firebase;
     fbSub('adminBots', onSnapshot(collection(db, 'bots'), (snapshot) => {
         FB_CACHE.adminBots = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
-        renderAdminBots();
+        scheduleRenderAdminBots();
     }, (err) => {
         console.error('Admin bots snapshot error:', err);
         showToast(t('admin.toast_load_error', { msg: err.message }));
@@ -2774,7 +2783,7 @@ function renderAdminBots() {
                 <td>${lastStr}</td>
                 <td><small style="opacity:0.7;">${escapeHTML(b.hostname || '—')}</small></td>
                 <td>
-                    <button class="btn-delete" style="padding: 6px 10px; background: rgba(255,59,48,0.1); border: 1px solid rgba(255,59,48,0.2); border-radius: 6px; cursor: pointer; color: #ff3b30; font-size: 0.75rem;"
+                    <button type="button" class="btn-delete" style="padding: 6px 10px; background: rgba(255,59,48,0.1); border: 1px solid rgba(255,59,48,0.2); border-radius: 6px; cursor: pointer; color: #ff3b30; font-size: 0.75rem;"
                         onclick='window.deleteBot(event, ${JSON.stringify(b.id)})' title="${t('admin.bots_btn_delete')}">
                         ${t('admin.bots_btn_delete')}
                     </button>
@@ -2799,18 +2808,25 @@ window.setBotEnabled = async (botId, enabled) => {
     }
 };
 
-window.deleteBot = async (event, botId) => {
+window.deleteBot = (event, botId) => {
     event.stopPropagation();
+    event.preventDefault();
     if (!window.__isAdmin) return;
-    if (!confirm(t('admin.confirm_delete_bot', { name: botId }))) return;
-    const { db, doc, deleteDoc } = window.firebase;
-    try {
-        await deleteDoc(doc(db, 'bots', botId));
-        showToast(t('admin.toast_bot_deleted', { name: botId }));
-    } catch (e) {
-        console.error(e);
-        showToast(t('admin.toast_bot_delete_error', { msg: e.message }));
-    }
+    window.niceConfirm({
+        title: t('modals.confirm_order_title') || 'Xác nhận',
+        message: t('admin.confirm_delete_bot', { name: botId }),
+        icon: '🗑️',
+        onConfirm: async () => {
+            const { db, doc, deleteDoc } = window.firebase;
+            try {
+                await deleteDoc(doc(db, 'bots', botId));
+                showToast(t('admin.toast_bot_deleted', { name: botId }));
+            } catch (e) {
+                console.error(e);
+                showToast(t('admin.toast_bot_delete_error', { msg: e.message }));
+            }
+        }
+    });
 };
 
 // ----- REFERRALS (Admin tab) -----

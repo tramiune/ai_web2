@@ -107,11 +107,21 @@ class AidancingApiClient:
         """Upload qua form create — tab create tạm, tab nền giữ nguyên."""
         bg = self.warmup(force=False)
         page = self.context.new_page()
+        submit_timeout = int(os.environ.get("BOT_CREATE_SUBMIT_TIMEOUT_MS", "300000"))
+        upload_timeout = int(os.environ.get("BOT_CREATE_UPLOAD_TIMEOUT_MS", "600000"))
         try:
+            img_mb = os.path.getsize(image_path) / (1024 * 1024)
+            vid_mb = os.path.getsize(video_path) / (1024 * 1024)
+            print(f"📎 Nạp form: ảnh {img_mb:.1f}MB, video {vid_mb:.1f}MB")
             create_url = f"{AIDANCING_ORIGIN}/create/general?id={model_id}"
             page.goto(create_url, wait_until="domcontentloaded", timeout=90000)
+            page.bring_to_front()
             page.set_input_files('input[name="image"]', image_path)
+            page.wait_for_timeout(1500)
+            print(f"📤 Gán file video vào form ({video_path})...")
             page.set_input_files('input[name="video"]', video_path)
+            page.bring_to_front()
+            self._wait_create_uploads(page, vid_mb, upload_timeout)
             page.evaluate(
                 """({qualityMode, aspectRatio}) => {
                     const q = document.querySelector('[name=qualityMode]');
@@ -123,7 +133,8 @@ class AidancingApiClient:
             )
             before_ids = {j["id"] for j in self.list_jobs(page=0, size=30).get("items", [])}
             page.locator("button.neon-ai-2").first.click()
-            page.wait_for_url("**/dashboard**", timeout=120000)
+            print(f"⏳ Đã bấm submit — chờ về dashboard (tối đa {submit_timeout // 1000}s)...")
+            page.wait_for_url("**/dashboard**", timeout=submit_timeout)
             page.wait_for_timeout(2000)
             for _ in range(10):
                 data = self.list_jobs(page=0, size=30)
@@ -139,6 +150,58 @@ class AidancingApiClient:
                 pass
             if bg and not bg.is_closed():
                 self._page = bg
+
+    def _wait_create_uploads(self, page, video_mb, timeout_ms):
+        """Aidancing phải upload xong video lên form trước khi bấm submit."""
+        per_mb_ms = int(os.environ.get("BOT_CREATE_WAIT_PER_MB_MS", "12000"))
+        min_wait = int(os.environ.get("BOT_CREATE_MIN_WAIT_MS", "8000"))
+        target_ms = min(timeout_ms, max(min_wait, int(video_mb * per_mb_ms)))
+        print(
+            f"⏳ Chờ Aidancing upload video ({video_mb:.1f} MB, ~{target_ms // 1000}s) — "
+            "đừng đóng tab create..."
+        )
+        page.bring_to_front()
+        deadline = time.time() + (target_ms / 1000)
+        last_log = 0
+        while time.time() < deadline:
+            try:
+                ready = page.evaluate(
+                    """() => {
+                        const spinners = document.querySelectorAll(
+                            '[class*="loading"], [class*="uploading"], [class*="spinner"], [class*="progress"]'
+                        );
+                        for (const el of spinners) {
+                            const s = getComputedStyle(el);
+                            if (s.display !== 'none' && s.visibility !== 'hidden' && el.offsetParent !== null)
+                                return { ok: false, why: 'spinner' };
+                        }
+                        const btn = document.querySelector('button.neon-ai-2');
+                        if (btn && btn.disabled) return { ok: false, why: 'btn-disabled' };
+                        const vid = document.querySelector('video');
+                        if (vid && vid.readyState >= 2 && vid.duration > 0)
+                            return { ok: true, why: 'video-preview' };
+                        const inp = document.querySelector('input[name="video"]');
+                        if (inp && inp.files && inp.files.length > 0 && !btn?.disabled)
+                            return { ok: true, why: 'input-ready' };
+                        return { ok: false, why: 'waiting' };
+                    }"""
+                )
+                if ready.get("ok"):
+                    print(f"✅ Video sẵn sàng submit ({ready.get('why')})")
+                    return
+            except Exception:
+                pass
+            now = time.time()
+            if now - last_log >= 15:
+                left = int(deadline - now)
+                print(f"   ... vẫn đang upload (~{left}s còn lại)")
+                last_log = now
+                try:
+                    page.bring_to_front()
+                except Exception:
+                    pass
+            page.wait_for_timeout(2000)
+        print(f"⚠️ Hết thời gian chờ upload — thử submit anyway (video {video_mb:.1f} MB)")
 
     def download_file(self, file_id, dest_path):
         """Tải /api/proxy/files/{id} qua fetch — không reload tab."""

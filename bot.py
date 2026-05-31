@@ -608,6 +608,8 @@ _INTERNAL_ERROR_MARKERS = (
 _ERROR_TELEGRAM_COOLDOWN = 900
 _error_telegram_sent = {}
 _error_telegram_lock = threading.Lock()
+_session_error_backoff = {}
+SESSION_ERROR_BACKOFF_SEC = 300
 
 def is_internal_bot_error(err):
     s = (err or '').lower()
@@ -638,16 +640,16 @@ def apply_bot_error_update(doc_ref, order_id, order_data, err, context='nạp đ
     """Lỗi Aidancing/hạ tầng bot → Telegram admin, không hiện adminNote cho khách."""
     if is_internal_bot_error(err):
         notify_internal_error_telegram(order_id, order_data, err, context)
-        doc_ref.update({
-            'adminNote': firestore.DELETE_FIELD,
-            'updatedAt': firestore.SERVER_TIMESTAMP,
-        })
+        _session_error_backoff[order_id] = time.time() + SESSION_ERROR_BACKOFF_SEC
         return True
     doc_ref.update({
         'adminNote': f"Bot nạp lỗi: {err}",
         'updatedAt': firestore.SERVER_TIMESTAMP,
     })
     return False
+
+def _pending_submit_backoff_active(order_id):
+    return time.time() < _session_error_backoff.get(order_id, 0)
 
 def scrape_aidancing_balance(page):
     """Đọc số coin còn lại trên header aidancing.net (vd: 101.0)."""
@@ -947,6 +949,8 @@ def submit_to_aidancing(order_id):
     if not is_bot_enabled():
         print(f"⏸️ [{BOT_NAME}] Bot TẮT — bỏ qua nạp đơn {order_id}")
         return
+    if _pending_submit_backoff_active(order_id):
+        return
     with _submitting_orders_lock:
         if order_id in _submitting_orders:
             print(f"⏭️ [{BOT_NAME}] Đơn {order_id} đang nạp — bỏ qua trùng lặp")
@@ -1023,6 +1027,7 @@ def submit_to_aidancing(order_id):
                     job_id = run_playwright(_pw_create_job, model_id, char_path, vid_path)
                     print(f"🆔 [API] Job mới: {job_id}")
                     _mark_order_processing(doc_ref, job_id)
+                    _session_error_backoff.pop(order_id, None)
                     print(f"✅ Đơn {order_id} → processing (aidancing đã nhận job)")
                     try:
                         short_id = order_id[-6:].upper()
@@ -1102,6 +1107,7 @@ def submit_to_aidancing(order_id):
                 if job_id:
                     print(f"🆔 LẤY ĐƯỢC JOB ID MỚI: {job_id}")
                     _mark_order_processing(doc_ref, job_id)
+                    _session_error_backoff.pop(order_id, None)
                     print(f"✅ Đơn {order_id} → processing (aidancing đã nhận job)")
                     try:
                         short_id = order_id[-6:].upper()
@@ -1337,14 +1343,40 @@ def on_pending_orders_snapshot(keys, changes, read_time):
     _ensure_pending_worker()
     with _pending_queue_lock:
         for ch in changes:
-            if ch.type.name in ['ADDED', 'MODIFIED']:
-                oid = ch.document.id
-                with _submitting_orders_lock:
-                    if oid in _submitting_orders:
+            if ch.type.name != 'ADDED':
+                continue
+            oid = ch.document.id
+            with _submitting_orders_lock:
+                if oid in _submitting_orders:
+                    continue
+            if oid not in _pending_order_queue:
+                _pending_order_queue.append(oid)
+                print(f"📋 Xếp hàng nạp đơn: {oid} (còn {len(_pending_order_queue)} trong queue)")
+
+
+def _rescan_pending_orders_loop():
+    """Thử lại đơn pending sau khi session Aidancing được sửa (mỗi 5 phút)."""
+    while True:
+        time.sleep(SESSION_ERROR_BACKOFF_SEC)
+        if not is_bot_enabled():
+            continue
+        try:
+            docs = db.collection('orders').where(
+                filter=FieldFilter("status", "==", "pending")
+            ).limit(20).stream()
+            with _pending_queue_lock:
+                for doc in docs:
+                    oid = doc.id
+                    if _pending_submit_backoff_active(oid):
                         continue
-                if oid not in _pending_order_queue:
-                    _pending_order_queue.append(oid)
-                    print(f"📋 Xếp hàng nạp đơn: {oid} (còn {len(_pending_order_queue)} trong queue)")
+                    with _submitting_orders_lock:
+                        if oid in _submitting_orders:
+                            continue
+                    if oid not in _pending_order_queue:
+                        _pending_order_queue.append(oid)
+                        print(f"🔄 Hàng đợi thử lại đơn pending: {oid}")
+        except Exception as e:
+            print(f"⚠️ rescan pending: {e}")
 
 def start_bot():
     global BOT_NAME
@@ -1387,6 +1419,7 @@ def start_bot():
             time.sleep(sleep_sec)
 
     threading.Thread(target=monitor_loop, daemon=True).start()
+    threading.Thread(target=_rescan_pending_orders_loop, daemon=True).start()
 
     db.collection('orders').where(filter=FieldFilter("status", "==", "pending")).on_snapshot(on_pending_orders_snapshot)
 
