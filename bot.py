@@ -174,6 +174,8 @@ def _pw_poll_orders(orders_to_check):
         elif status in ('FAILED', 'ERROR', 'CANCELLED'):
             print(f"❌ Job {job_id} thất bại trên aidancing ({status})")
             order_data = doc.to_dict()
+            err_detail = f'Aidancing job {job_id} {status}: {job.get("errorMessage") or ""}'
+            notify_internal_error_telegram(doc.id, order_data, err_detail, 'render aidancing')
             cost_coins = order_data.get('costCoins', 0)
             user_id = order_data.get('userId')
             if cost_coins > 0 and user_id:
@@ -183,7 +185,8 @@ def _pw_poll_orders(orders_to_check):
                     print(f"⚠️ Hoàn coin lỗi: {e}")
             db.collection('orders').document(doc.id).update({
                 'status': 'failed',
-                'adminNote': f'Aidancing job {status}: {job.get("errorMessage") or ""}',
+                'adminNote': firestore.DELETE_FIELD,
+                'systemNote': 'Đơn hàng xử lý không thành công, hệ thống đã hoàn lại coin.',
                 'updatedAt': firestore.SERVER_TIMESTAMP
             })
         else:
@@ -595,6 +598,57 @@ def send_telegram_message(text):
     except Exception as e:
         print(f"❌ Lỗi kết nối gửi Telegram: {e}")
 
+_INTERNAL_ERROR_MARKERS = (
+    'aidancing', '/api/proxy/', 'proxy/jobs', 'proxy/files',
+    '401', '503', '502', '429', 'đăng nhập lại', 'bảo trì',
+    'chrome cdp', 'connect_over_cdp', 'econnrefused', 'target closed',
+    'different thread', 'job id aidancing', 'dashboard', 'create/general',
+    'bot nạp', 'maintenance',
+)
+_ERROR_TELEGRAM_COOLDOWN = 900
+_error_telegram_sent = {}
+_error_telegram_lock = threading.Lock()
+
+def is_internal_bot_error(err):
+    s = (err or '').lower()
+    return any(m in s for m in _INTERNAL_ERROR_MARKERS)
+
+def notify_internal_error_telegram(order_id, order_data, err, context=''):
+    now = time.time()
+    with _error_telegram_lock:
+        last = _error_telegram_sent.get(order_id, 0)
+        if now - last < _ERROR_TELEGRAM_COOLDOWN:
+            return
+        _error_telegram_sent[order_id] = now
+    short_id = order_id[-6:].upper()
+    user_name = (order_data or {}).get('userName', 'Khách hàng')
+    user_email = (order_data or {}).get('userEmail', 'N/A')
+    ctx = f" ({context})" if context else ""
+    err_text = (err or '')[:500]
+    msg = (
+        f"🚨 <b>BOT LỖI NỘI BỘ{ctx}</b>\n\n"
+        f"🆔 Mã đơn: #{short_id}\n"
+        f"👤 Khách: {user_name}\n"
+        f"📧 Email: {user_email}\n"
+        f"⚠️ Chi tiết:\n<code>{err_text}</code>"
+    )
+    send_telegram_message(msg)
+
+def apply_bot_error_update(doc_ref, order_id, order_data, err, context='nạp đơn'):
+    """Lỗi Aidancing/hạ tầng bot → Telegram admin, không hiện adminNote cho khách."""
+    if is_internal_bot_error(err):
+        notify_internal_error_telegram(order_id, order_data, err, context)
+        doc_ref.update({
+            'adminNote': firestore.DELETE_FIELD,
+            'updatedAt': firestore.SERVER_TIMESTAMP,
+        })
+        return True
+    doc_ref.update({
+        'adminNote': f"Bot nạp lỗi: {err}",
+        'updatedAt': firestore.SERVER_TIMESTAMP,
+    })
+    return False
+
 def scrape_aidancing_balance(page):
     """Đọc số coin còn lại trên header aidancing.net (vd: 101.0)."""
     try:
@@ -984,14 +1038,12 @@ def submit_to_aidancing(order_id):
                 except Exception as e:
                     print(f"❌ Lỗi nạp API: {e}")
                     err = str(e)
-                    updates = {'adminNote': f"Bot nạp lỗi: {err}", 'updatedAt': firestore.SERVER_TIMESTAMP}
                     if any(x in err for x in ('ECONNREFUSED', 'Chrome CDP chưa chạy', 'connect_over_cdp', 'Target closed', 'different thread')):
-                        updates['adminNote'] = 'Chờ Chrome CDP (port 9223) — mở Chrome rồi bot tự thử lại'
                         try:
                             run_playwright(_api_pool.reset)
                         except Exception:
                             pass
-                    doc_ref.update(updates)
+                    apply_bot_error_update(doc_ref, order_id, data, err, 'nạp API')
                 finally:
                     if char_path and os.path.exists(char_path):
                         os.remove(char_path)
@@ -1067,17 +1119,11 @@ def submit_to_aidancing(order_id):
                     except Exception as tele_err:
                         print(f"⚠️ Lỗi gửi thông báo Telegram xử lý: {tele_err}")
                 else:
-                    doc_ref.update({
-                        'adminNote': 'Bot nạp xong nhưng không lấy được Job ID aidancing — vẫn pending, thử lại sau.',
-                        'updatedAt': firestore.SERVER_TIMESTAMP,
-                    })
+                    err = 'Bot nạp xong nhưng không lấy được Job ID aidancing — vẫn pending, thử lại sau.'
+                    apply_bot_error_update(doc_ref, order_id, data, err, 'nạp browser')
             except Exception as e:
                 print(f"❌ Lỗi nạp: {e}")
-                err = str(e)
-                updates = {'adminNote': f"Bot nạp lỗi: {err}", 'updatedAt': firestore.SERVER_TIMESTAMP}
-                if any(x in err for x in ('ECONNREFUSED', 'Chrome CDP chưa chạy', 'connect_over_cdp', 'different thread')):
-                    updates['adminNote'] = 'Chờ Chrome CDP (port 9223) — mở Chrome rồi bot tự thử lại'
-                doc_ref.update(updates)
+                apply_bot_error_update(doc_ref, order_id, data, str(e), 'nạp browser')
             finally:
                 if os.path.exists(char_path):
                     os.remove(char_path)
