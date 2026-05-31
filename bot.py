@@ -147,8 +147,68 @@ def _reset_persistent_api():
 
 
 def _pw_create_job(model_id, char_path, vid_path):
-    api = _api_pool.get()
-    return api.create_job(model_id, char_path, vid_path)
+    """Nạp đơn giống web1 browser mode — 1 tab dashboard→create, poll vẫn dùng API."""
+    _api_pool.get()
+    browser = _api_pool._browser
+    if not browser:
+        raise RuntimeError("Chrome CDP chưa sẵn sàng — mở Chrome port 9223 trước")
+    page = browser.new_page()
+    submit_timeout = int(os.environ.get("BOT_CREATE_SUBMIT_TIMEOUT_MS", "300000"))
+    video_wait_ms = int(os.environ.get("BOT_CREATE_UPLOAD_TIMEOUT_MS", "600000"))
+    try:
+        vid_mb = os.path.getsize(vid_path) / (1024 * 1024)
+        img_mb = os.path.getsize(char_path) / (1024 * 1024)
+        print(f"🌐 [NẠP FORM] ảnh {img_mb:.1f}MB, video {vid_mb:.1f}MB — luồng giống web1")
+        goto_aidancing_dashboard(page, browser)
+        old_job_ids = set(re.findall(r'\b\d{6}\b', page.content()))
+        create_url = f"{AIDANCING_ORIGIN}/create/general?id={model_id}"
+        print(f"🌐 Vào trang tạo: {create_url}")
+        page.goto(create_url, timeout=90000)
+        page.bring_to_front()
+        page.set_input_files('input[name="image"]', char_path)
+        page.wait_for_timeout(1500)
+        print(f"📤 Gán video ({vid_path})...")
+        page.set_input_files('input[name="video"]', vid_path)
+        preview_timeout = min(video_wait_ms, max(30000, int(vid_mb * 15000)))
+        print(f"⏳ Chờ preview video (~{preview_timeout // 1000}s)...")
+        try:
+            page.wait_for_function(
+                """() => {
+                    const v = document.querySelector('video');
+                    return v && v.readyState >= 2 && v.duration > 0;
+                }""",
+                timeout=preview_timeout,
+            )
+            print("✅ Video preview sẵn sàng — bấm submit")
+        except Exception:
+            fallback = min(video_wait_ms, max(20000, int(vid_mb * 12000)))
+            print(f"⏳ Chưa thấy preview — chờ thêm {fallback // 1000}s (video {vid_mb:.1f} MB)...")
+            page.wait_for_timeout(fallback)
+        page.locator('button.neon-ai-2').first.click()
+        print(f"⏳ Đợi về dashboard (tối đa {submit_timeout // 1000}s)...")
+        page.wait_for_url("**/dashboard**", timeout=submit_timeout)
+        page.wait_for_timeout(2000)
+        for _ in range(15):
+            page.wait_for_timeout(2000)
+            new_jobs = set(re.findall(r'\b\d{6}\b', page.content())) - old_job_ids
+            if new_jobs:
+                job_id = sorted(new_jobs)[-1]
+                print(f"🆔 Job mới (dashboard): {job_id}")
+                return job_id
+        api = _api_pool._api
+        if api:
+            data = api.list_jobs(page=0, size=30)
+            for item in data.get("items", []):
+                jid = str(item.get("id", ""))
+                if jid and jid not in old_job_ids:
+                    print(f"🆔 Job mới (API): {jid}")
+                    return jid
+        raise RuntimeError("Đã submit nhưng không lấy được Job ID mới")
+    finally:
+        try:
+            page.close()
+        except Exception:
+            pass
 
 
 def _pw_poll_orders(orders_to_check):
