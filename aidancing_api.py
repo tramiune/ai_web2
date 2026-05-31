@@ -103,16 +103,61 @@ class AidancingApiClient:
                 break
         return found
 
+    def _set_form_file(self, page, field_name, file_path, label):
+        path = os.path.abspath(file_path)
+        if not os.path.isfile(path):
+            raise RuntimeError(f"File không tồn tại: {path}")
+        mb = os.path.getsize(path) / (1024 * 1024)
+        timeout = int(os.environ.get("BOT_CREATE_FILE_TIMEOUT_MS", "180000"))
+        print(f"📎 Gán {label}: {mb:.1f} MB")
+        last_err = None
+        for attempt in range(1, 4):
+            try:
+                page.locator(f'input[name="{field_name}"]').set_input_files(path, timeout=timeout)
+                return mb
+            except Exception as e:
+                last_err = e
+                if attempt < 3:
+                    print(f"⚠️ Gán {label} lần {attempt} lỗi — thử lại sau 8s...")
+                    page.wait_for_timeout(8000)
+        raise last_err
+
+    def _wait_form_idle(self, page, timeout_ms=90000):
+        """Chờ Aidancing xử lý upload trước khi gán file tiếp theo."""
+        try:
+            page.wait_for_function(
+                """() => {
+                    const spinners = document.querySelectorAll(
+                        '[class*="loading"], [class*="uploading"], [class*="spinner"]'
+                    );
+                    for (const el of spinners) {
+                        const s = getComputedStyle(el);
+                        if (s.display !== 'none' && s.visibility !== 'hidden' && el.offsetParent !== null)
+                            return false;
+                    }
+                    return true;
+                }""",
+                timeout=timeout_ms,
+            )
+        except Exception:
+            page.wait_for_timeout(5000)
+
     def create_job(self, model_id, image_path, video_path, quality_mode="2", aspect_ratio="9:16"):
         """Upload qua form create — tab create tạm, tab nền giữ nguyên."""
         bg = self.warmup(force=False)
         page = self.context.new_page()
-        file_timeout = int(os.environ.get("BOT_CREATE_FILE_TIMEOUT_MS", "120000"))
+        file_timeout = int(os.environ.get("BOT_CREATE_FILE_TIMEOUT_MS", "180000"))
+        submit_timeout = int(os.environ.get("BOT_CREATE_SUBMIT_TIMEOUT_MS", "300000"))
         try:
+            page.set_default_timeout(file_timeout)
+            page.set_default_navigation_timeout(90000)
             create_url = f"{AIDANCING_ORIGIN}/create/general?id={model_id}"
             page.goto(create_url, wait_until="domcontentloaded", timeout=90000)
-            page.set_input_files('input[name="image"]', image_path, timeout=file_timeout)
-            page.set_input_files('input[name="video"]', video_path, timeout=file_timeout)
+            page.bring_to_front()
+            self._set_form_file(page, "image", image_path, "ảnh")
+            self._wait_form_idle(page, min(file_timeout, 90000))
+            self._set_form_file(page, "video", video_path, "video")
+            page.wait_for_timeout(2000)
             page.evaluate(
                 """({qualityMode, aspectRatio}) => {
                     const q = document.querySelector('[name=qualityMode]');
@@ -124,7 +169,7 @@ class AidancingApiClient:
             )
             before_ids = {j["id"] for j in self.list_jobs(page=0, size=30).get("items", [])}
             page.locator("button.neon-ai-2").first.click()
-            page.wait_for_url("**/dashboard**", timeout=120000)
+            page.wait_for_url("**/dashboard**", timeout=submit_timeout)
             page.wait_for_timeout(2000)
             for _ in range(10):
                 data = self.list_jobs(page=0, size=30)
