@@ -211,35 +211,6 @@ let initialCoinsBeforeTopup = 0; // Để theo dõi số dư trước khi nạp
 let referralEarningsUnsubscribe = null; // Cleanup handle for referralEarnings onSnapshot (legacy - giờ dùng FB_LISTENERS)
 let referralCurrentCode = null; // User's referral code, populated when opening referral page
 const SUPER_ADMIN_EMAILS = ["traderfinn0312@gmail.com", "dinhhoangvan.hh@gmail.com"]; // Danh sách admin khởi tạo
-const ADMIN_TELEGRAM_HOLD_MS = 10000;
-
-function isAnonymousUser(user) {
-    return !!user?.isAnonymous;
-}
-
-function userEmailSafe(user) {
-    return user?.email || '';
-}
-
-function userDisplayLabel(user, profileData) {
-    if (profileData?.displayName) return profileData.displayName;
-    if (user?.displayName) return user.displayName;
-    if (user?.email) return user.email.split('@')[0];
-    const shortId = (user?.uid || '').slice(0, 6);
-    return t('navbar.guest_display', { id: shortId || '------' });
-}
-
-function userEmailLabel(user, profileData) {
-    if (user?.email) return user.email;
-    if (profileData?.email) return profileData.email;
-    return t('navbar.guest_account');
-}
-
-function updateLogoutMenuItem(user) {
-    const logoutItem = document.getElementById('user-logout-item');
-    if (!logoutItem) return;
-    logoutItem.style.display = isAnonymousUser(user) ? 'none' : 'flex';
-}
 
 // =====================================================================
 // FIREBASE LISTENER REGISTRY (chống leak listener gây tốn reads)
@@ -511,21 +482,16 @@ export async function initAppLogic() {
 
     // (Intro modal removed; login-required uses auth-modal)
 
-    const { auth, onAuthStateChanged, signInAnonymously } = window.firebase;
+    const { auth, onAuthStateChanged } = window.firebase;
 
-    onAuthStateChanged(auth, async (user) => {
+    onAuthStateChanged(auth, (user) => {
         try {
             if (user) {
                 currentUser = user;
-                await handleUserLoggedIn(user);
-                return;
-            }
-            currentUser = null;
-            try {
-                await signInAnonymously(auth);
-            } catch (e) {
-                console.error('[Auth] Anonymous sign-in failed:', e);
-                showToast(t('common.error_auth', { msg: e?.message || 'anonymous' }));
+                handleUserLoggedIn(user);
+            } else {
+                currentUser = null;
+                handleUserLoggedOut();
             }
         } catch (e) {
             console.error("Auth Change Error:", e);
@@ -546,58 +512,8 @@ export async function initAppLogic() {
     checkMaintenance();
     // Detect In-App Browsers
     detectInAppBrowser();
-    setupAdminTelegramUnlock();
 
     // Call again after dynamic parts are rendered
-    applyTranslations();
-}
-
-function setupAdminTelegramUnlock() {
-    const fab = document.getElementById('telegram-fab');
-    if (!fab) return;
-
-    let holdTimer = null;
-    let holdTriggered = false;
-
-    const clearHold = () => {
-        if (holdTimer) {
-            clearTimeout(holdTimer);
-            holdTimer = null;
-        }
-    };
-
-    const startHold = () => {
-        clearHold();
-        holdTriggered = false;
-        holdTimer = setTimeout(() => {
-            holdTimer = null;
-            holdTriggered = true;
-            showAdminAuthModal();
-        }, ADMIN_TELEGRAM_HOLD_MS);
-    };
-
-    fab.addEventListener('mousedown', startHold);
-    fab.addEventListener('touchstart', startHold, { passive: true });
-    fab.addEventListener('mouseup', clearHold);
-    fab.addEventListener('mouseleave', clearHold);
-    fab.addEventListener('touchend', clearHold);
-    fab.addEventListener('touchcancel', clearHold);
-    fab.addEventListener('click', (e) => {
-        if (holdTriggered) {
-            e.preventDefault();
-            holdTriggered = false;
-        }
-    }, true);
-}
-
-function showAdminAuthModal() {
-    const authModal = document.getElementById('auth-modal');
-    if (!authModal) return;
-    const v = document.getElementById('auth-banner-video');
-    if (v && !v.src) {
-        v.src = 'https://pub-2b53cd37b4a44642afdbb8bb470bde66.r2.dev/banner.mp4';
-    }
-    authModal.style.display = 'flex';
     applyTranslations();
 }
 
@@ -922,30 +838,23 @@ window.useTrendShortcut = (id, url) => {
     }, 100);
 };
 
-async function loginAdmin() {
+async function login() {
     const { auth, GoogleAuthProvider, signInWithPopup } = window.firebase;
     const provider = new GoogleAuthProvider();
     try {
-        const authModal = document.getElementById('auth-modal');
-        if (authModal) authModal.style.display = 'none';
         await signInWithPopup(auth, provider);
-        window.focus();
+        window.focus(); // Đưa focus về lại tab hiện tại sau khi popup đóng
         showToast(t('common.toast_login_success'));
     } catch (error) {
-        console.error('Admin login error', error);
-        window.focus();
+        console.error("Login Error", error);
+        window.focus(); // Đưa focus về ngay cả khi lỗi
         showToast(t('common.toast_login_failed'));
     }
 }
 
 async function logout() {
     const { auth, signOut } = window.firebase;
-    if (!auth.currentUser || isAnonymousUser(auth.currentUser)) return;
     try {
-        fbUnsubAll();
-        window.__isAdmin = false;
-        window.__isSuperAdmin = false;
-        window.__currentUserData = null;
         await signOut(auth);
         showToast(t('common.toast_logout_success'));
     } catch (error) {
@@ -959,37 +868,17 @@ async function logout() {
 async function handleUserLoggedIn(user) {
     const { db, doc, getDoc, setDoc, onSnapshot, collection, query, where } = window.firebase;
 
+    // Ẩn Auth Modal bắt buộc
     const authModal = document.getElementById('auth-modal');
     if (authModal) authModal.style.display = 'none';
 
-    const loginSection = document.getElementById('login-section');
-    if (loginSection) loginSection.style.display = 'none';
-    const loginBtn = document.getElementById('login-btn');
-    if (loginBtn) loginBtn.style.display = 'none';
-
-    const userRefEarly = doc(db, "users", user.uid);
-    const userSnapEarly = await getDoc(userRefEarly);
-    const profileEarly = userSnapEarly.exists() ? userSnapEarly.data() : null;
-
-    if (!isAnonymousUser(user)) {
-        const email = userEmailSafe(user);
-        const isBootstrapAdmin = email && SUPER_ADMIN_EMAILS.includes(email);
-        const role = profileEarly?.role;
-        const isAdminRole = role === 'admin' || role === 'super-admin';
-        if (!isBootstrapAdmin && !isAdminRole) {
-            showToast(t('navbar.toast_admin_denied'));
-            const { auth, signOut } = window.firebase;
-            await signOut(auth);
-            return;
-        }
-    }
-
+    // Hiển thị Profile Menu thay vì ghi đè HTML
+    document.getElementById('login-btn').style.display = 'none';
     document.getElementById('user-profile-menu').style.display = 'block';
     const navbarCoin = document.getElementById('navbar-coin-widget');
     if (navbarCoin) navbarCoin.style.display = 'flex';
-    document.getElementById('dropdown-user-name').innerText = userDisplayLabel(user, profileEarly);
-    document.getElementById('dropdown-user-email').innerText = userEmailLabel(user, profileEarly);
-    updateLogoutMenuItem(user);
+    document.getElementById('dropdown-user-name').innerText = user.displayName || user.email.split('@')[0];
+    document.getElementById('dropdown-user-email').innerText = user.email;
 
     // Avatar for user menu button
     const avatarImg = document.getElementById('user-menu-avatar');
@@ -1028,19 +917,20 @@ async function handleUserLoggedIn(user) {
         console.log("🎯 TikTok Pixel: Identified user for Advanced Matching");
     }
 
+    // Firebase/Google Identify
     if (user.email) {
-        trackAnalyticsEvent('login', { method: isAnonymousUser(user) ? 'anonymous' : 'google' });
-    } else if (isAnonymousUser(user)) {
-        trackAnalyticsEvent('login', { method: 'anonymous' });
+        trackAnalyticsEvent('login', { method: 'email' });
+        console.log("🎯 Firebase Analytics: User identified");
     }
 
-    const userRef = userRefEarly;
-    const userSnap = userSnapEarly;
+    const userRef = doc(db, "users", user.uid);
+    const userSnap = await getDoc(userRef);
 
-    const isBootstrapSuperAdmin = !!user.email && SUPER_ADMIN_EMAILS.includes(user.email);
+    // Bootstrap Super Admin from hardcoded list to Database
+    const isBootstrapSuperAdmin = SUPER_ADMIN_EMAILS.includes(user.email);
 
     if (!userSnap.exists()) {
-        const defaultName = userDisplayLabel(user);
+        const defaultName = user.displayName || user.email.split('@')[0];
         const defaultPhoto = user.photoURL || "https://www.gravatar.com/avatar/00000000000000000000000000000000?d=mp&f=y";
 
         // Resolve pending referral code (if any) before creating user doc.
@@ -1069,9 +959,8 @@ async function handleUserLoggedIn(user) {
         const newUserPayload = {
             uid: user.uid,
             displayName: defaultName,
-            email: user.email || '',
+            email: user.email,
             photoURL: defaultPhoto,
-            authProvider: isAnonymousUser(user) ? 'anonymous' : (user.providerData?.[0]?.providerId || 'google.com'),
             coins: 0,
             role: isBootstrapSuperAdmin ? 'super-admin' : 'user', // Tự động gán role vào DB
             createdAt: window.firebase.serverTimestamp(),
@@ -1233,6 +1122,59 @@ function navigateFromURLParam() {
     }
 }
 
+function handleUserLoggedOut() {
+    // Show login-required popup with banner video
+    const authModal = document.getElementById('auth-modal');
+    if (authModal) authModal.style.display = 'flex';
+    const v = document.getElementById('auth-banner-video');
+    if (v && !v.src) {
+        v.src = 'https://pub-2b53cd37b4a44642afdbb8bb470bde66.r2.dev/banner.mp4';
+    }
+
+    document.getElementById('login-btn').style.display = 'flex';
+    document.getElementById('user-profile-menu').style.display = 'none';
+    const navbarCoin = document.getElementById('navbar-coin-widget');
+    if (navbarCoin) navbarCoin.style.display = 'none';
+
+    // Toggle Dashboard sub-elements
+    const dashIn = document.getElementById('dashboard-logged-in');
+    const dashOut = document.getElementById('dashboard-auth-placeholder');
+    if (dashIn) dashIn.style.display = 'none';
+    if (dashOut) dashOut.style.display = 'block';
+
+    const topupPage = document.getElementById('topup-history-page');
+    if (topupPage) topupPage.style.display = 'none';
+    const referralPage = document.getElementById('referral-page');
+    if (referralPage) referralPage.style.display = 'none';
+    const adminProfileItem = document.getElementById('admin-dropdown-item-profile');
+    if (adminProfileItem) adminProfileItem.style.display = 'none';
+    const adminDivider = document.getElementById('admin-dropdown-divider');
+    if (adminDivider) adminDivider.style.display = 'none';
+
+    // [TỐI ƯU] Cleanup TẤT CẢ Firebase listener khi logout.
+    // Trước đây chỉ unsub referralEarnings -> các listener khác (myOrders, myTopups,
+    // userProfile, adminOrders, adminTopups, adminUsers) tiếp tục sống và đọc data
+    // dù user đã logout.
+    fbUnsubAll();
+
+    // Reset các flag/cache liên quan
+    window.__isAdmin = false;
+    window.__isSuperAdmin = false;
+    window.__currentUserData = null;
+    adminSubscribedOrderStatus = null;
+    adminSubscribedTopupStatus = null;
+    Object.keys(FB_CACHE).forEach(k => { delete FB_CACHE[k]; });
+
+    // Legacy var (giờ đã unsub trong fbUnsubAll, để null cho an toàn)
+    referralEarningsUnsubscribe = null;
+
+    dailyPromoRemaining = 0;
+    updateFirstOrderUI();
+
+    // Home = My videos (dashboard sẽ hiện placeholder login-required)
+    showDashboard();
+}
+
 function showDashboard() {
     hideAllPages();
     document.getElementById('user-dashboard').style.display = 'block';
@@ -1252,14 +1194,12 @@ function showBuildChannel() {
 }
 
 function showAdminPanel() {
-    if (!currentUser || isAnonymousUser(currentUser) || !window.__isAdmin) {
-        showToast(t('navbar.toast_admin_denied'));
-        return;
-    }
     hideAllPages();
     document.getElementById('admin-panel').style.display = 'block';
     window.scrollTo(0, 0);
-    loadAdminPanel();
+    // [TỐI ƯU] Chỉ subscribe admin Firebase listener khi admin VÀO trang admin.
+    // Trước đây listener được tạo từ trong user-profile listener -> chạy sai chỗ.
+    if (window.__isAdmin) loadAdminPanel();
 }
 
 function showLanding() {
@@ -1292,8 +1232,7 @@ window.toggleDashboard = () => {
     }
 };
 
-window.loginAdmin = loginAdmin;
-window.showAdminAuthModal = showAdminAuthModal;
+window.loginUser = login;
 window.logoutUser = logout;
 window.showLanding = showLanding;
 window.showDashboard = showDashboard;
@@ -1656,8 +1595,8 @@ window.openModal = (id) => {
 };
 
 window.closeModal = (id) => {
-    const el = document.getElementById(id);
-    if (el) el.style.display = 'none';
+    if (id === 'auth-modal') return; // non-dismissible
+    document.getElementById(id).style.display = 'none';
 };
 
 window.openTopupModal = () => {
@@ -1665,7 +1604,7 @@ window.openTopupModal = () => {
 };
 
 window.openPricingModal = () => {
-    if (!currentUser) return;
+    if (!currentUser) return login();
     window.openModal('pricing-modal');
     
     // TikTok Pixel: ViewContent (Viewing Topup Packages)
@@ -1682,7 +1621,7 @@ window.openPricingModal = () => {
 };
 
 window.selectTopup = async (id) => {
-    if (!currentUser) return;
+    if (!currentUser) return login();
 
     selectedTopupPackage = COIN_PACKAGES.find(p => p.id === id);
 
@@ -2069,6 +2008,9 @@ async function setupEventListeners() {
             e.preventDefault();
 
             if (!currentUser) {
+                // Nếu chưa đăng nhập thì hiện Auth Modal
+                const authModal = document.getElementById('auth-modal');
+                if (authModal) authModal.style.display = 'flex';
                 showToast(t('common.toast_login_required'));
                 return;
             }
@@ -4148,7 +4090,7 @@ export function renderAIModels() {
 window.renderAIModels = renderAIModels;
 
 window.createVideoWithModel = (modelId) => {
-    if (!currentUser) return;
+    if (!currentUser) return login();
 
     // Lưu trữ Model ID đã chọn
     window.selectedAIModelId = modelId;
