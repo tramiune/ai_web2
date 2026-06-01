@@ -4171,6 +4171,19 @@ section {
   transform: translateY(0);
 }
 
+.auth-modal-btn--secondary {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow: none;
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.auth-modal-btn--secondary:hover {
+  background: rgba(255, 255, 255, 0.1);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+}
+
 .auth-modal-footer {
   margin-top: 1.25rem;
   font-size: 0.85rem;
