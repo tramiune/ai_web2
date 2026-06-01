@@ -2997,7 +2997,24 @@ section {
 
 .upload-zone.upload-zone--small.has-preview > span,
 .upload-zone.upload-zone--small.has-preview > .order-upload-btn:not(.preview-change-btn),
-.upload-zone.upload-zone--small.has-preview > .upload-note,
+.upload-zone.upload-zone--small.has-preview > .upload-note {
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.tiktok-tab-panel.has-preview > span,
+.tiktok-tab-panel.has-preview > .tiktok-tab-field,
+.tiktok-tab-panel.has-preview > .upload-note {
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.tiktok-tab-panel.has-preview {
+  min-height: 100px;
+}
+
 #order-modal .video-tabs {
   margin-bottom: 0.5rem;
 }

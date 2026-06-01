@@ -1521,6 +1521,14 @@ window.switchVideoSource = (type) => {
         uploadBtn?.classList.add('active');
         if (uploadSection) uploadSection.style.display = 'block';
         window.currentVideoSource = 'upload';
+        const fileInput = document.getElementById('file-video');
+        const existing = fileInput?.files?.[0];
+        if (existing?.type?.startsWith('video/')) {
+            renderVideoFilePreview('preview-video-container', existing, {
+                inputId: 'file-video',
+                changeKey: 'modals.video_change'
+            });
+        }
     } else if (type === 'tiktok') {
         tiktokBtn?.classList.add('active');
         if (tiktokSection) tiktokSection.style.display = 'block';
@@ -2020,6 +2028,8 @@ async function getBlobVideoDurationSec(blob) {
         video.preload = 'metadata';
         video.muted = true;
         video.playsInline = true;
+        video.setAttribute('playsinline', '');
+        video.setAttribute('webkit-playsinline', '');
         video.src = url;
         await new Promise((resolve, reject) => {
             video.onloadedmetadata = () => resolve();
@@ -2153,8 +2163,18 @@ window.fetchTikTokVideo = async () => {
         if (templateInput) templateInput.value = '';
         window.currentVideoSource = 'upload';
 
-        fileInput.dispatchEvent(new Event('change', { bubbles: true }));
-        window.switchVideoSource('upload');
+        renderVideoFilePreview('preview-tiktok-video-container', file, {
+            changeKey: 'modals.tiktok_pick_another',
+            onChange: () => {
+                fileInput.value = '';
+                const tiktokPreview = document.getElementById('preview-tiktok-video-container');
+                if (tiktokPreview) {
+                    tiktokPreview.innerHTML = '';
+                    syncUploadZonePreviewState(tiktokPreview);
+                }
+                document.getElementById('tiktok-video-url')?.focus();
+            }
+        });
         showToast(needsTrim ? t('modals.tiktok_fetch_trimmed') : t('modals.tiktok_fetch_success'));
     } catch (e) {
         console.error('[TikTok] fetch failed:', e);
@@ -2167,6 +2187,88 @@ window.fetchTikTokVideo = async () => {
         }
     }
 };
+
+function renderVideoFilePreview(containerId, file, options = {}) {
+    const container = document.getElementById(containerId);
+    if (!container || !file) return;
+
+    if (file.size > 90 * 1024 * 1024) {
+        showToast(t('modals.video_size_limit'));
+        if (options.inputId) {
+            const input = document.getElementById(options.inputId);
+            if (input) input.value = '';
+        }
+        container.innerHTML = '';
+        syncUploadZonePreviewState(container);
+        return;
+    }
+
+    const probe = document.createElement('video');
+    probe.preload = 'metadata';
+    probe.muted = true;
+    probe.playsInline = true;
+    const probeUrl = URL.createObjectURL(file);
+    probe.onloadedmetadata = () => {
+        const duration = probe.duration;
+        URL.revokeObjectURL(probeUrl);
+        if (duration > MAX_REFERENCE_VIDEO_SEC + 0.15) {
+            showToast(t('modals.video_duration_limit'));
+            if (options.inputId) {
+                const input = document.getElementById(options.inputId);
+                if (input) input.value = '';
+            }
+            container.innerHTML = '';
+            syncUploadZonePreviewState(container);
+            return;
+        }
+
+        container.innerHTML = '';
+        const previewVideo = document.createElement('video');
+        const previewUrl = URL.createObjectURL(file);
+        previewVideo.src = previewUrl;
+        previewVideo.muted = true;
+        previewVideo.loop = true;
+        previewVideo.playsInline = true;
+        previewVideo.setAttribute('playsinline', '');
+        previewVideo.setAttribute('webkit-playsinline', '');
+        previewVideo.preload = 'metadata';
+        previewVideo.controls = false;
+        previewVideo.disablePictureInPicture = true;
+        previewVideo.style.width = '100%';
+        previewVideo.style.height = '100%';
+        previewVideo.style.objectFit = 'cover';
+        previewVideo.style.borderRadius = '8px';
+        previewVideo.addEventListener('loadeddata', () => {
+            try {
+                previewVideo.pause();
+                previewVideo.currentTime = 0;
+            } catch (_) { /* ignore */ }
+        }, { once: true });
+
+        container.appendChild(previewVideo);
+
+        if (options.onChange) {
+            const btn = document.createElement('button');
+            btn.type = 'button';
+            btn.className = 'preview-change-btn btn-primary order-upload-btn';
+            btn.textContent = t(options.changeKey || 'modals.video_change');
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                options.onChange();
+            });
+            container.appendChild(btn);
+        } else if (options.inputId) {
+            appendPreviewChangeButton(container, options.inputId, options.changeKey || 'modals.video_change');
+        }
+
+        syncUploadZonePreviewState(container);
+    };
+    probe.onerror = () => {
+        URL.revokeObjectURL(probeUrl);
+        showToast(t('modals.tiktok_fetch_failed'));
+    };
+    probe.src = probeUrl;
+}
 
 window.handlePreview = (input, containerId) => {
     const container = document.getElementById(containerId);
@@ -2205,36 +2307,10 @@ window.handlePreview = (input, containerId) => {
         appendPreviewChangeButton(container, meta.inputId, meta.changeKey);
         syncUploadZonePreviewState(container);
     } else if (file.type.startsWith('video/')) {
-        if (file.size > 90 * 1024 * 1024) {
-            showToast(t('modals.video_size_limit'));
-            input.value = '';
-            return;
-        }
-        const video = document.createElement('video');
-        video.preload = 'metadata';
-        video.onloadedmetadata = () => {
-            const duration = video.duration;
-            if (duration > 20) {
-                showToast(t('modals.video_duration_limit'));
-                input.value = '';
-                URL.revokeObjectURL(video.src);
-                return;
-            }
-            const previewVideo = document.createElement('video');
-            previewVideo.src = URL.createObjectURL(file);
-            previewVideo.controls = false;
-            previewVideo.autoplay = true;
-            previewVideo.muted = true;
-            previewVideo.loop = true;
-            previewVideo.style.width = '100%';
-            previewVideo.style.height = '100%';
-            previewVideo.style.objectFit = 'cover';
-            previewVideo.style.borderRadius = '8px';
-            container.appendChild(previewVideo);
-            appendPreviewChangeButton(container, meta.inputId, meta.changeKey);
-            syncUploadZonePreviewState(container);
-        };
-        video.src = URL.createObjectURL(file);
+        renderVideoFilePreview(containerId, file, {
+            inputId: meta.inputId,
+            changeKey: meta.changeKey
+        });
     }
 };
 
