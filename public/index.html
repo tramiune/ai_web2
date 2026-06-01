@@ -104,7 +104,7 @@
                             <span data-i18n="navbar.admin_panel">Admin Panel</span>
                         </a>
                         <hr id="admin-dropdown-divider" class="dropdown-divider" style="display: none;">
-                        <a href="javascript:void(0)" id="user-logout-item" class="dropdown-item" style="color: var(--danger); display: none;"
+                        <a href="javascript:void(0)" class="dropdown-item" style="color: var(--danger);"
                             onclick="window.logout()">
                             <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
                                 stroke-linecap="round" stroke-linejoin="round">
@@ -117,8 +117,12 @@
                     </div>
                 </div>
 
-                <!-- Login button removed: guests use Firebase Anonymous automatically -->
-                <div id="login-section" style="display: none;" aria-hidden="true"></div>
+                <!-- 4. Logged Out State (Login button) -->
+                <div id="login-section">
+                    <button class="auth-btn" id="login-btn" onclick="window.loginUser()">
+                        <span data-i18n="navbar.login">Đăng nhập</span>
+                    </button>
+                </div>
             </div>
         </div>
     </nav>
@@ -1085,7 +1089,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
         import { getAnalytics, logEvent } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-analytics.js";
-        import { getAuth, GoogleAuthProvider, signInWithPopup, signInAnonymously, signOut, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
+        import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
         import { getFirestore, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, collection, addDoc, query, where, onSnapshot, orderBy, limit, runTransaction, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
         import { getStorage, ref, uploadBytesResumable, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-storage.js";
 
@@ -1099,7 +1103,7 @@
         const storage = getStorage(app);
 
         // Make Firebase available globally for script.js
-        window.firebase = { auth, db, storage, analytics, logEvent, GoogleAuthProvider, signInWithPopup, signInAnonymously, signOut, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, collection, addDoc, query, where, onSnapshot, orderBy, limit, runTransaction, serverTimestamp, ref, uploadBytesResumable, getDownloadURL };
+        window.firebase = { auth, db, storage, analytics, logEvent, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, collection, addDoc, query, where, onSnapshot, orderBy, limit, runTransaction, serverTimestamp, ref, uploadBytesResumable, getDownloadURL };
         window.ADMIN_EMAILS = ADMIN_EMAILS;
 
         initAppLogic().catch(err => console.error('initAppLogic failed:', err));
@@ -1173,7 +1177,7 @@
         </div>
     </footer>
     <!-- Floating Telegram Button (right) -->
-    <a href="https://t.me/motionaistudio" target="_blank" rel="noopener noreferrer" class="telegram-fab" id="telegram-fab" data-i18n-title="common.support_chat" title="Chat với chúng tôi">
+    <a href="https://t.me/motionaistudio" target="_blank" class="telegram-fab" data-i18n-title="common.support_chat" title="Chat với chúng tôi">
         <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
             <path d="M22 2L11 13" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
             <path d="M22 2L15 22L11 13L2 9L22 2Z" stroke="white" stroke-width="2" stroke-linecap="round"
@@ -1196,22 +1200,24 @@
             <div style="width: 100%; aspect-ratio: 16/9; border-radius: 14px; overflow: hidden; background:#000; border: 1px solid rgba(255,255,255,0.12); margin-bottom: 1rem;">
                 <video id="auth-banner-video" autoplay muted loop playsinline style="width:100%; height:100%; object-fit: cover; display:block;"></video>
             </div>
-            <h2 class="auth-modal-title" style="margin-top: 0;" data-i18n="modals.admin_login_title">Đăng nhập Admin</h2>
-            <p class="auth-modal-desc" id="auth-modal-desc" style="margin-bottom: 1.25rem;" data-i18n="modals.admin_login_desc">Chỉ dành cho quản trị viên. Dùng tài khoản Google đã được cấp quyền.</p>
+            <h2 class="auth-modal-title" style="margin-top: 0;">Đăng nhập để tạo video trending</h2>
+            <p class="auth-modal-desc" id="auth-modal-desc" style="margin-bottom: 1.25rem;">Vào nhanh một xíu thôi nha, để mình lưu video của bạn và làm cho “xịn” hơn.</p>
 
-            <button class="auth-modal-btn" id="google-login-btn" onclick="window.loginAdmin()" style="margin-top: 0;">
+
+
+            <button class="auth-modal-btn" id="google-login-btn" onclick="window.loginUser()" style="margin-top: 0;">
                 <svg width="20" height="20" viewBox="0 0 48 48" style="flex-shrink:0;">
                     <path fill="#FFC107" d="M43.611 20.083H42V20H24v8h11.303c-1.649 4.657-6.08 8-11.303 8-6.627 0-12-5.373-12-12s5.373-12 12-12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4 12.955 4 4 12.955 4 24s8.955 20 20 20 20-8.955 20-20c0-1.341-.138-2.65-.389-3.917z"/>
                     <path fill="#FF3D00" d="M6.306 14.691l6.571 4.819C14.655 15.108 18.961 12 24 12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4 16.318 4 9.656 8.337 6.306 14.691z"/>
                     <path fill="#4CAF50" d="M24 44c5.166 0 9.86-1.977 13.409-5.192l-6.19-5.238A11.91 11.91 0 0124 36c-5.202 0-9.619-3.317-11.283-7.946l-6.522 5.025C9.505 39.556 16.227 44 24 44z"/>
                     <path fill="#1976D2" d="M43.611 20.083H42V20H24v8h11.303a12.04 12.04 0 01-4.087 5.571l.003-.002 6.19 5.238C36.971 39.205 44 34 44 24c0-1.341-.138-2.65-.389-3.917z"/>
                 </svg>
-                <span data-i18n="modals.admin_google_btn">Đăng nhập Google (Admin)</span>
+                <span data-i18n="modals.auth_google_btn">Đăng nhập với Google</span>
             </button>
             <div id="inapp-auth-note" data-i18n="modals.inapp_auth_note" style="display: none; font-size: 0.8rem; color: #ff9100; margin-top: 0.5rem; background: rgba(255,145,0,0.1); padding: 10px; border-radius: 8px; border: 1px dashed rgba(255,145,0,0.3); text-align: center;">
                 ⚠️ Trình duyệt này thường chặn đăng nhập Google...
             </div>
-            <button type="button" class="btn-secondary" style="width:100%; margin-top:0.75rem;" onclick="window.closeModal('auth-modal')" data-i18n="modals.admin_login_cancel">Đóng</button>
+            <p class="auth-modal-footer" data-i18n="modals.auth_footer">Chỉ mất vài giây • Hoàn toàn miễn phí</p>
         </div>
     </div>
 
