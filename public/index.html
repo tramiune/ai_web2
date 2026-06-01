@@ -877,8 +877,33 @@
                         </div>
                         <div class="form-group order-upload-field">
                             <label data-i18n="modals.video_label">2. Video mẫu / bối cảnh</label>
-                            <div id="video-upload-section">
-                                <div class="upload-zone upload-zone--small" onclick="document.getElementById('file-video').click()">
+                            <div class="video-tabs">
+                                <div class="video-tab active" id="tab-tiktok"
+                                    onclick="window.switchVideoSource('tiktok')"
+                                    data-i18n="modals.video_tab_tiktok">Link TikTok</div>
+                                <div class="video-tab" id="tab-upload"
+                                    onclick="window.switchVideoSource('upload')"
+                                    data-i18n="modals.video_tab_upload">Tải lên</div>
+                            </div>
+                            <div id="video-tiktok-section">
+                                <div class="upload-zone upload-zone--small tiktok-tab-panel">
+                                    <span>🔗</span>
+                                    <div class="tiktok-tab-field">
+                                        <input type="url" id="tiktok-video-url" class="tiktok-link-input"
+                                            inputmode="url" autocomplete="off" spellcheck="false"
+                                            data-i18n="modals.tiktok_url_placeholder"
+                                            placeholder="Dán link TikTok">
+                                        <button type="button" id="tiktok-fetch-btn"
+                                            class="btn-primary order-upload-btn tiktok-fetch-btn"
+                                            onclick="window.fetchTikTokVideo()"
+                                            data-i18n="modals.tiktok_fetch_btn">Lấy video</button>
+                                    </div>
+                                    <div class="upload-note" data-i18n="modals.tiktok_tab_hint">Tự cắt còn 20s nếu video dài hơn</div>
+                                </div>
+                            </div>
+                            <div id="video-upload-section" style="display: none;">
+                                <div class="upload-zone upload-zone--small"
+                                    onclick="document.getElementById('file-video').click()">
                                     <span>🎥</span>
                                     <button type="button" class="btn-primary order-upload-btn"
                                         onclick="event.stopPropagation(); document.getElementById('file-video').click()">
@@ -889,6 +914,9 @@
                                 </div>
                                 <input type="file" id="file-video" accept="video/*" style="display:none"
                                     onchange="window.handlePreview(this, 'preview-video-container')">
+                            </div>
+                            <div id="video-library-section" style="display: none;">
+                                <div class="template-grid" id="template-library-grid"></div>
                             </div>
                             <input type="hidden" id="selected-template-url" value="">
                         </div>

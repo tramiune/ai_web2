@@ -4,8 +4,9 @@
   "description": "MotionAI Studio - AI Video Motion Transfer Web",
   "main": "index.html",
   "scripts": {
-    "start": "npx live-server public --host=0.0.0.0 --port=8080",
-    "dev": "wrangler dev",
+    "start": "wrangler dev --ip 0.0.0.0 --port 8787",
+    "static": "npx live-server public --host=0.0.0.0 --port=8080",
+    "dev": "wrangler dev --ip 0.0.0.0 --port 8787",
     "deploy": "wrangler deploy"
   },
   "devDependencies": {
