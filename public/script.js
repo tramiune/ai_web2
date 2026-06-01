@@ -211,48 +211,6 @@ let initialCoinsBeforeTopup = 0; // Để theo dõi số dư trước khi nạp
 let referralEarningsUnsubscribe = null; // Cleanup handle for referralEarnings onSnapshot (legacy - giờ dùng FB_LISTENERS)
 let referralCurrentCode = null; // User's referral code, populated when opening referral page
 const SUPER_ADMIN_EMAILS = ["traderfinn0312@gmail.com", "dinhhoangvan.hh@gmail.com"]; // Danh sách admin khởi tạo
-const AUTH_MODE_KEY = 'nhay_auth_mode'; // 'anonymous' | 'google'
-
-function setAuthMode(mode) {
-    if (mode) localStorage.setItem(AUTH_MODE_KEY, mode);
-}
-
-function getAuthMode() {
-    return localStorage.getItem(AUTH_MODE_KEY);
-}
-
-function isAnonymousUser(user) {
-    return !!user?.isAnonymous;
-}
-
-function userEmailSafe(user) {
-    return user?.email || '';
-}
-
-function userDisplayLabel(user, profileData) {
-    if (profileData?.displayName) return profileData.displayName;
-    if (user?.displayName) return user.displayName;
-    const email = userEmailSafe(user);
-    if (email) return email.split('@')[0];
-    if (isAnonymousUser(user)) {
-        const id = (user.uid || '').slice(0, 6).toUpperCase();
-        return t('common.guest_display', { id });
-    }
-    return 'User';
-}
-
-function userEmailLabel(user, profileData) {
-    const email = profileData?.email || userEmailSafe(user);
-    if (email) return email;
-    if (isAnonymousUser(user)) return t('common.guest_account');
-    return '';
-}
-
-function updateLinkGoogleMenuItem(user) {
-    const el = document.getElementById('link-google-dropdown-item');
-    if (!el) return;
-    el.style.display = isAnonymousUser(user) ? 'flex' : 'none';
-}
 
 // =====================================================================
 // FIREBASE LISTENER REGISTRY (chống leak listener gây tốn reads)
@@ -524,36 +482,17 @@ export async function initAppLogic() {
 
     // (Intro modal removed; login-required uses auth-modal)
 
-    const { auth, onAuthStateChanged, signInAnonymously } = window.firebase;
+    const { auth, onAuthStateChanged } = window.firebase;
 
-    onAuthStateChanged(auth, async (user) => {
+    onAuthStateChanged(auth, (user) => {
         try {
             if (user) {
                 currentUser = user;
-                if (!isAnonymousUser(user)) setAuthMode('google');
                 handleUserLoggedIn(user);
-                return;
-            }
-
-            currentUser = null;
-            const mode = getAuthMode();
-            // User cũ (đã từng đăng Google): không tự tạo tài khoản khách — tránh mất coin/video.
-            if (mode === 'google') {
+            } else {
+                currentUser = null;
                 handleUserLoggedOut();
-                return;
             }
-
-            // Khách quay lại cùng thiết bị: tự đăng nhập ẩn danh.
-            if (mode === 'anonymous') {
-                try {
-                    await signInAnonymously(auth);
-                    return;
-                } catch (e) {
-                    console.warn('[Auth] Auto anonymous sign-in failed:', e);
-                }
-            }
-
-            handleUserLoggedOut();
         } catch (e) {
             console.error("Auth Change Error:", e);
             showToast(t('common.error_auth', { msg: e.message }));
@@ -589,17 +528,24 @@ function detectInAppBrowser() {
     const isSafari = /Safari/i.test(ua) && !/Chrome|CriOS/i.test(ua) && !/SamsungBrowser|MiuiBrowser/i.test(ua);
     const isSupported = (isChrome || isSafari) && !isInApp;
 
-    const guestBtn = document.getElementById('guest-login-btn');
-    const googleBtn = document.getElementById('google-login-btn');
-    const inAppNote = document.getElementById('inapp-auth-note');
-
     if (!isSupported) {
+        const googleBtn = document.getElementById('google-login-btn');
+        const googleDivider = document.querySelector('.google-auth-divider');
+        const inAppNote = document.getElementById('inapp-auth-note');
+        const authEmailBtn = document.getElementById('auth-email-btn');
+        const authModalDesc = document.getElementById('auth-modal-desc');
+
         if (googleBtn) googleBtn.style.display = 'none';
+        if (googleDivider) googleDivider.style.display = 'none';
         if (inAppNote) inAppNote.style.display = 'block';
-        if (guestBtn) guestBtn.style.display = 'flex';
-    } else {
-        if (googleBtn) googleBtn.style.display = 'flex';
-        if (inAppNote) inAppNote.style.display = 'none';
+        if (authEmailBtn) {
+            authEmailBtn.setAttribute('data-i18n', 'modals.auth_btn_register');
+            authEmailBtn.innerText = t('modals.auth_btn_register');
+        }
+        if (authModalDesc) {
+            authModalDesc.setAttribute('data-i18n', 'modals.auth_desc_register');
+            authModalDesc.innerHTML = t('modals.auth_desc_register');
+        }
     }
 }
 
@@ -892,61 +838,23 @@ window.useTrendShortcut = (id, url) => {
     }, 100);
 };
 
-async function loginGuest() {
-    const { auth, signInAnonymously } = window.firebase;
-    try {
-        await signInAnonymously(auth);
-        setAuthMode('anonymous');
-        window.focus();
-        showToast(t('common.toast_login_success'));
-    } catch (error) {
-        console.error("Guest login error", error);
-        window.focus();
-        showToast(t('common.toast_login_failed'));
-    }
-}
-
-async function loginWithGoogle() {
-    const { auth, GoogleAuthProvider, signInWithPopup, linkWithPopup } = window.firebase;
+async function login() {
+    const { auth, GoogleAuthProvider, signInWithPopup } = window.firebase;
     const provider = new GoogleAuthProvider();
     try {
-        if (auth.currentUser?.isAnonymous) {
-            await linkWithPopup(auth.currentUser, provider);
-            const { db, doc, updateDoc, serverTimestamp } = window.firebase;
-            const u = auth.currentUser;
-            await updateDoc(doc(db, 'users', u.uid), {
-                email: userEmailSafe(u),
-                displayName: u.displayName || userDisplayLabel(u),
-                photoURL: u.photoURL || '',
-                authProvider: 'google.com',
-                updatedAt: serverTimestamp()
-            });
-            showToast(t('common.toast_link_google_success'));
-        } else {
-            await signInWithPopup(auth, provider);
-            showToast(t('common.toast_login_success'));
-        }
-        setAuthMode('google');
-        window.focus();
+        await signInWithPopup(auth, provider);
+        window.focus(); // Đưa focus về lại tab hiện tại sau khi popup đóng
+        showToast(t('common.toast_login_success'));
     } catch (error) {
-        console.error("Google login error", error);
-        window.focus();
-        if (error?.code === 'auth/credential-already-in-use' || error?.code === 'auth/email-already-in-use') {
-            showToast(t('common.toast_google_account_exists'));
-        } else {
-            showToast(t('common.toast_login_failed'));
-        }
+        console.error("Login Error", error);
+        window.focus(); // Đưa focus về ngay cả khi lỗi
+        showToast(t('common.toast_login_failed'));
     }
 }
 
 async function logout() {
     const { auth, signOut } = window.firebase;
     try {
-        if (currentUser && !isAnonymousUser(currentUser)) {
-            setAuthMode('google');
-        } else {
-            setAuthMode('anonymous');
-        }
         await signOut(auth);
         showToast(t('common.toast_logout_success'));
     } catch (error) {
@@ -969,13 +877,8 @@ async function handleUserLoggedIn(user) {
     document.getElementById('user-profile-menu').style.display = 'block';
     const navbarCoin = document.getElementById('navbar-coin-widget');
     if (navbarCoin) navbarCoin.style.display = 'flex';
-    const userRefEarly = doc(db, "users", user.uid);
-    const userSnapEarly = await getDoc(userRefEarly);
-    const profileEarly = userSnapEarly.exists() ? userSnapEarly.data() : null;
-
-    document.getElementById('dropdown-user-name').innerText = userDisplayLabel(user, profileEarly);
-    document.getElementById('dropdown-user-email').innerText = userEmailLabel(user, profileEarly);
-    updateLinkGoogleMenuItem(user);
+    document.getElementById('dropdown-user-name').innerText = user.displayName || user.email.split('@')[0];
+    document.getElementById('dropdown-user-email').innerText = user.email;
 
     // Avatar for user menu button
     const avatarImg = document.getElementById('user-menu-avatar');
@@ -1015,18 +918,19 @@ async function handleUserLoggedIn(user) {
     }
 
     // Firebase/Google Identify
-    trackAnalyticsEvent('login', {
-        method: isAnonymousUser(user) ? 'anonymous' : 'google'
-    });
+    if (user.email) {
+        trackAnalyticsEvent('login', { method: 'email' });
+        console.log("🎯 Firebase Analytics: User identified");
+    }
 
-    const userRef = userRefEarly;
-    const userSnap = userSnapEarly;
+    const userRef = doc(db, "users", user.uid);
+    const userSnap = await getDoc(userRef);
 
     // Bootstrap Super Admin from hardcoded list to Database
-    const isBootstrapSuperAdmin = SUPER_ADMIN_EMAILS.includes(userEmailSafe(user));
+    const isBootstrapSuperAdmin = SUPER_ADMIN_EMAILS.includes(user.email);
 
     if (!userSnap.exists()) {
-        const defaultName = userDisplayLabel(user);
+        const defaultName = user.displayName || user.email.split('@')[0];
         const defaultPhoto = user.photoURL || "https://www.gravatar.com/avatar/00000000000000000000000000000000?d=mp&f=y";
 
         // Resolve pending referral code (if any) before creating user doc.
@@ -1055,9 +959,8 @@ async function handleUserLoggedIn(user) {
         const newUserPayload = {
             uid: user.uid,
             displayName: defaultName,
-            email: userEmailSafe(user),
+            email: user.email,
             photoURL: defaultPhoto,
-            authProvider: isAnonymousUser(user) ? 'anonymous' : (user.providerData?.[0]?.providerId || 'google.com'),
             coins: 0,
             role: isBootstrapSuperAdmin ? 'super-admin' : 'user', // Tự động gán role vào DB
             createdAt: window.firebase.serverTimestamp(),
@@ -1131,7 +1034,7 @@ async function handleUserLoggedIn(user) {
 
             document.querySelectorAll('.coin-balance-text').forEach(el => el.innerText = currentCoins);
             document.querySelectorAll('.user-greeting-text').forEach(el => el.innerText = t('dashboard.greeting', { name: data.displayName }));
-            document.querySelectorAll('.user-email-text').forEach(el => el.innerText = data.email || t('common.guest_account'));
+            document.querySelectorAll('.user-email-text').forEach(el => el.innerText = data.email);
 
             // Check Admin Rights từ Database
             const isAdmin = data.role === 'admin' || data.role === 'super-admin';
@@ -1329,8 +1232,7 @@ window.toggleDashboard = () => {
     }
 };
 
-window.loginUser = loginGuest;
-window.loginWithGoogle = loginWithGoogle;
+window.loginUser = login;
 window.logoutUser = logout;
 window.showLanding = showLanding;
 window.showDashboard = showDashboard;
@@ -1702,7 +1604,7 @@ window.openTopupModal = () => {
 };
 
 window.openPricingModal = () => {
-    if (!currentUser) return loginGuest();
+    if (!currentUser) return login();
     window.openModal('pricing-modal');
     
     // TikTok Pixel: ViewContent (Viewing Topup Packages)
@@ -1719,7 +1621,7 @@ window.openPricingModal = () => {
 };
 
 window.selectTopup = async (id) => {
-    if (!currentUser) return loginGuest();
+    if (!currentUser) return login();
 
     selectedTopupPackage = COIN_PACKAGES.find(p => p.id === id);
 
@@ -1772,7 +1674,7 @@ window.selectTopup = async (id) => {
             
             await addDoc(collection(db, "topups"), {
                 userId: currentUser.uid,
-                userEmail: userEmailSafe(currentUser),
+                userEmail: currentUser.email,
                 userName: currentUser.displayName,
                 packageName: selectedTopupPackage.name,
                 coins: selectedTopupPackage.coins,
@@ -2254,7 +2156,7 @@ async function setupEventListeners() {
 
                                 const orderPayload = {
                                     userId: currentUser.uid,
-                                    userEmail: userEmailSafe(currentUser),
+                                    userEmail: currentUser.email,
                                     userName: currentUser.displayName,
                                     packageName: orderModel.name,
                                     modelId: orderModel.modelId,
@@ -2317,7 +2219,7 @@ async function setupEventListeners() {
                             const msg = `🚀 <b>ĐƠN HÀNG MỚI: ${serviceLabel.toUpperCase()}</b>\n\n` +
                                 `🆔 Mã đơn: #${orderId}\n` +
                                 `👤 Khách: ${escapeHTML(currentUser.displayName)}\n` +
-                                `📧 Email: ${escapeHTML(userEmailSafe(currentUser) || userDisplayLabel(currentUser))}\n` +
+                                `📧 Email: ${escapeHTML(currentUser.email)}\n` +
                                 `🔧 Dịch vụ: <b>${serviceLabel}</b>\n` +
                                 `📦 Gói: ${model.name}\n` +
                                 `💰 Chi phí: ${model.cost} Coin\n` +
@@ -4188,7 +4090,7 @@ export function renderAIModels() {
 window.renderAIModels = renderAIModels;
 
 window.createVideoWithModel = (modelId) => {
-    if (!currentUser) return loginGuest();
+    if (!currentUser) return login();
 
     // Lưu trữ Model ID đã chọn
     window.selectedAIModelId = modelId;

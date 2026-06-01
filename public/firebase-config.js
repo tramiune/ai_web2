@@ -1,9 +1,6 @@
 /**
  * Firebase Configuration for Nhay Cloud
  * Replace the placeholder values with your actual Firebase project config.
- *
- * Auth: enable "Anonymous" in Firebase Console → Authentication → Sign-in method.
- * Google sign-in stays enabled for existing users and optional account linking.
  */
 export const firebaseConfig = {
   apiKey: "AIzaSyCpyI7cWuFp5y_LIUhxv7inWR-pk6Wqem0",
