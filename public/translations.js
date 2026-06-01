@@ -22,7 +22,10 @@ window.TRANSLATIONS = {
             home: "Chọn video AI",
             build_channel: "Xây kênh 1000 fl / 21 ngày",
             referral: "Giới thiệu bạn bè",
-            admin_panel: "Admin Panel"
+            admin_panel: "Admin Panel",
+            guest_display: "Khách #{id}",
+            guest_account: "Tài khoản khách (thiết bị này)",
+            toast_admin_denied: "Tài khoản Google này không có quyền Admin."
         },
         payment: {
             tab_vietqr: "🇻🇳 Chuyển khoản VietQR",
@@ -345,6 +348,10 @@ window.TRANSLATIONS = {
             auth_desc_register: "Đăng ký ngay để nhận <b>ưu đãi 1.000đ</b> cho video AI đầu tiên!",
             auth_google_btn: "Đăng nhập với Google",
             auth_footer: "Chỉ mất vài giây • Hoàn toàn miễn phí",
+            admin_login_title: "Đăng nhập Admin",
+            admin_login_desc: "Chỉ dành cho quản trị viên. Dùng tài khoản Google đã được cấp quyền.",
+            admin_google_btn: "Đăng nhập Google (Admin)",
+            admin_login_cancel: "Đóng",
             video_tab_upload: "Tải lên",
             video_tab_library: "Thư viện mẫu",
             template_confirm_btn: "Chọn mẫu này",
@@ -504,6 +511,7 @@ window.TRANSLATIONS = {
             toast_result_copied: "✅ Đã copy link kết quả!",
             toast_email_required: "Vui lòng nhập email.",
             toast_user_not_found: "Không tìm thấy người dùng này.",
+            toast_admin_denied: "Tài khoản Google này không có quyền Admin.",
             toast_admin_granted: "Đã cấp quyền Admin cho {email}",
             toast_invalid_amount: "Vui lòng nhập số hợp lệ.",
             toast_balance_updated: "Đã cập nhật số dư Coin.",
@@ -654,7 +662,10 @@ window.TRANSLATIONS = {
             home: "Select AI Video",
             build_channel: "1k Followers / 21 days",
             referral: "Refer a Friend",
-            admin_panel: "Admin Panel"
+            admin_panel: "Admin Panel",
+            guest_display: "Guest #{id}",
+            guest_account: "Guest account (this device)",
+            toast_admin_denied: "This Google account does not have Admin access."
         },
         payment: {
             tab_vietqr: "🇻🇳 VietQR Bank Transfer",
@@ -977,6 +988,10 @@ window.TRANSLATIONS = {
             auth_desc_register: "Register now to get your first AI video for <b>only 1 Coin</b>!",
             auth_google_btn: "Sign in with Google",
             auth_footer: "Takes just seconds • Completely free",
+            admin_login_title: "Admin Sign In",
+            admin_login_desc: "For administrators only. Use an authorized Google account.",
+            admin_google_btn: "Sign in with Google (Admin)",
+            admin_login_cancel: "Close",
             video_tab_upload: "Upload",
             video_tab_library: "Template Library",
             template_confirm_btn: "Use this template",

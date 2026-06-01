@@ -14,6 +14,7 @@ export const firebaseConfig = {
 
 /**
  * Admin emails authorized to access the management panel.
+ * Enable Firebase Auth: Anonymous (all visitors) + Google (admin only).
  */
 export const ADMIN_EMAILS = ["traderfinn0312@gmail.com", "dinhhoangvan.hh@gmail.com"];
 
