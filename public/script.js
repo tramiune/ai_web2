@@ -211,18 +211,23 @@ let initialCoinsBeforeTopup = 0; // Để theo dõi số dư trước khi nạp
 let referralEarningsUnsubscribe = null; // Cleanup handle for referralEarnings onSnapshot (legacy - giờ dùng FB_LISTENERS)
 let referralCurrentCode = null; // User's referral code, populated when opening referral page
 const SUPER_ADMIN_EMAILS = ["traderfinn0312@gmail.com", "dinhhoangvan.hh@gmail.com"]; // Danh sách admin khởi tạo
-const AUTH_MODE_KEY = 'nhay_auth_mode'; // 'anonymous' | 'google'
-
-function setAuthMode(mode) {
-    if (mode) localStorage.setItem(AUTH_MODE_KEY, mode);
-}
-
-function getAuthMode() {
-    return localStorage.getItem(AUTH_MODE_KEY);
-}
+let _anonymousSignInPromise = null;
+let _pendingAdminPanel = false;
 
 function isAnonymousUser(user) {
     return !!user?.isAnonymous;
+}
+
+async function ensureAnonymousAuth() {
+    const { auth, signInAnonymously } = window.firebase;
+    if (auth.currentUser) return auth.currentUser;
+    if (!_anonymousSignInPromise) {
+        _anonymousSignInPromise = signInAnonymously(auth).finally(() => {
+            _anonymousSignInPromise = null;
+        });
+    }
+    await _anonymousSignInPromise;
+    return auth.currentUser;
 }
 
 function userEmailSafe(user) {
@@ -248,10 +253,10 @@ function userEmailLabel(user, profileData) {
     return '';
 }
 
-function updateLinkGoogleMenuItem(user) {
-    const el = document.getElementById('link-google-dropdown-item');
+function updateLogoutMenuItem(user) {
+    const el = document.getElementById('user-logout-item');
     if (!el) return;
-    el.style.display = isAnonymousUser(user) ? 'flex' : 'none';
+    el.style.display = isAnonymousUser(user) ? 'none' : 'flex';
 }
 
 // =====================================================================
@@ -530,30 +535,17 @@ export async function initAppLogic() {
         try {
             if (user) {
                 currentUser = user;
-                if (!isAnonymousUser(user)) setAuthMode('google');
                 handleUserLoggedIn(user);
                 return;
             }
 
             currentUser = null;
-            const mode = getAuthMode();
-            // User cũ (đã từng đăng Google): không tự tạo tài khoản khách — tránh mất coin/video.
-            if (mode === 'google') {
-                handleUserLoggedOut();
-                return;
+            try {
+                await signInAnonymously(auth);
+            } catch (e) {
+                console.error('[Auth] Anonymous sign-in failed:', e);
+                handleAuthUnavailable(e);
             }
-
-            // Khách quay lại cùng thiết bị: tự đăng nhập ẩn danh.
-            if (mode === 'anonymous') {
-                try {
-                    await signInAnonymously(auth);
-                    return;
-                } catch (e) {
-                    console.warn('[Auth] Auto anonymous sign-in failed:', e);
-                }
-            }
-
-            handleUserLoggedOut();
         } catch (e) {
             console.error("Auth Change Error:", e);
             showToast(t('common.error_auth', { msg: e.message }));
@@ -571,36 +563,9 @@ export async function initAppLogic() {
     updateFirstOrderUI();
     // Check maintenance status
     checkMaintenance();
-    // Detect In-App Browsers
-    detectInAppBrowser();
 
     // Call again after dynamic parts are rendered
     applyTranslations();
-}
-
-// --- Browser Detection ---
-function detectInAppBrowser() {
-    const ua = navigator.userAgent || navigator.vendor || window.opera;
-    const isTikTok = /TikTok/i.test(ua);
-    const isInApp = isTikTok || /FBAV|FBAN|Messenger|Instagram|Line|WhatsApp|Telegram|MicroMessenger/i.test(ua);
-
-    // Special logic: Hide Google Login if not Chrome/Safari or if In-App
-    const isChrome = (/Chrome/i.test(ua) || /CriOS/i.test(ua)) && !/Edge|OPR|Edg|SamsungBrowser|Vivaldi|MiuiBrowser/i.test(ua);
-    const isSafari = /Safari/i.test(ua) && !/Chrome|CriOS/i.test(ua) && !/SamsungBrowser|MiuiBrowser/i.test(ua);
-    const isSupported = (isChrome || isSafari) && !isInApp;
-
-    const guestBtn = document.getElementById('guest-login-btn');
-    const googleBtn = document.getElementById('google-login-btn');
-    const inAppNote = document.getElementById('inapp-auth-note');
-
-    if (!isSupported) {
-        if (googleBtn) googleBtn.style.display = 'none';
-        if (inAppNote) inAppNote.style.display = 'block';
-        if (guestBtn) guestBtn.style.display = 'flex';
-    } else {
-        if (googleBtn) googleBtn.style.display = 'flex';
-        if (inAppNote) inAppNote.style.display = 'none';
-    }
 }
 
 // --- Premium Glow Effects ---
@@ -892,61 +857,36 @@ window.useTrendShortcut = (id, url) => {
     }, 100);
 };
 
-async function loginGuest() {
-    const { auth, signInAnonymously } = window.firebase;
+function showAdminLoginModal() {
+    const modal = document.getElementById('admin-login-modal');
+    if (!modal) return;
+    modal.style.display = 'flex';
+}
+
+function handleAuthUnavailable(error) {
+    const loginSection = document.getElementById('login-section');
+    if (loginSection) loginSection.style.display = 'none';
+    showToast(t('common.error_auth', { msg: error?.message || 'anonymous' }));
+}
+
+async function loginAdmin() {
+    const { auth, GoogleAuthProvider, signInWithPopup, signOut } = window.firebase;
+    const provider = new GoogleAuthProvider();
     try {
-        await signInAnonymously(auth);
-        setAuthMode('anonymous');
+        if (auth.currentUser) await signOut(auth);
+        await signInWithPopup(auth, provider);
         window.focus();
         showToast(t('common.toast_login_success'));
     } catch (error) {
-        console.error("Guest login error", error);
+        console.error('Admin login error', error);
         window.focus();
         showToast(t('common.toast_login_failed'));
-    }
-}
-
-async function loginWithGoogle() {
-    const { auth, GoogleAuthProvider, signInWithPopup, linkWithPopup } = window.firebase;
-    const provider = new GoogleAuthProvider();
-    try {
-        if (auth.currentUser?.isAnonymous) {
-            await linkWithPopup(auth.currentUser, provider);
-            const { db, doc, updateDoc, serverTimestamp } = window.firebase;
-            const u = auth.currentUser;
-            await updateDoc(doc(db, 'users', u.uid), {
-                email: userEmailSafe(u),
-                displayName: u.displayName || userDisplayLabel(u),
-                photoURL: u.photoURL || '',
-                authProvider: 'google.com',
-                updatedAt: serverTimestamp()
-            });
-            showToast(t('common.toast_link_google_success'));
-        } else {
-            await signInWithPopup(auth, provider);
-            showToast(t('common.toast_login_success'));
-        }
-        setAuthMode('google');
-        window.focus();
-    } catch (error) {
-        console.error("Google login error", error);
-        window.focus();
-        if (error?.code === 'auth/credential-already-in-use' || error?.code === 'auth/email-already-in-use') {
-            showToast(t('common.toast_google_account_exists'));
-        } else {
-            showToast(t('common.toast_login_failed'));
-        }
     }
 }
 
 async function logout() {
     const { auth, signOut } = window.firebase;
     try {
-        if (currentUser && !isAnonymousUser(currentUser)) {
-            setAuthMode('google');
-        } else {
-            setAuthMode('anonymous');
-        }
         await signOut(auth);
         showToast(t('common.toast_logout_success'));
     } catch (error) {
@@ -960,12 +900,11 @@ async function logout() {
 async function handleUserLoggedIn(user) {
     const { db, doc, getDoc, setDoc, onSnapshot, collection, query, where } = window.firebase;
 
-    // Ẩn Auth Modal bắt buộc
-    const authModal = document.getElementById('auth-modal');
-    if (authModal) authModal.style.display = 'none';
+    const adminModal = document.getElementById('admin-login-modal');
+    if (adminModal) adminModal.style.display = 'none';
 
-    // Hiển thị Profile Menu thay vì ghi đè HTML
-    document.getElementById('login-btn').style.display = 'none';
+    const loginSection = document.getElementById('login-section');
+    if (loginSection) loginSection.style.display = 'none';
     document.getElementById('user-profile-menu').style.display = 'block';
     const navbarCoin = document.getElementById('navbar-coin-widget');
     if (navbarCoin) navbarCoin.style.display = 'flex';
@@ -975,7 +914,7 @@ async function handleUserLoggedIn(user) {
 
     document.getElementById('dropdown-user-name').innerText = userDisplayLabel(user, profileEarly);
     document.getElementById('dropdown-user-email').innerText = userEmailLabel(user, profileEarly);
-    updateLinkGoogleMenuItem(user);
+    updateLogoutMenuItem(user);
 
     // Avatar for user menu button
     const avatarImg = document.getElementById('user-menu-avatar');
@@ -1146,7 +1085,7 @@ async function handleUserLoggedIn(user) {
             window.__isAdmin = isAdmin;
             window.__isSuperAdmin = isSuperAdmin;
 
-            if (isAdmin) {
+            if (isAdmin && !isAnonymousUser(currentUser)) {
                 const adminProfileItem = document.getElementById('admin-dropdown-item-profile');
                 if (adminProfileItem) adminProfileItem.style.display = 'flex';
                 const adminDivider = document.getElementById('admin-dropdown-divider');
@@ -1155,6 +1094,13 @@ async function handleUserLoggedIn(user) {
                 if (isSuperAdmin) {
                     const tabUsersEl = document.getElementById('tab-users');
                     if (tabUsersEl) tabUsersEl.style.display = 'block';
+                }
+
+                if (_pendingAdminPanel) {
+                    _pendingAdminPanel = false;
+                    const adminModal = document.getElementById('admin-login-modal');
+                    if (adminModal) adminModal.style.display = 'none';
+                    showAdminPanel();
                 }
 
                 // [TỐI ƯU - DEFENSIVE] Nếu user đang xem admin panel ngay lúc này
@@ -1167,6 +1113,14 @@ async function handleUserLoggedIn(user) {
                     loadAdminPanel();
                 }
             } else {
+                if (_pendingAdminPanel && currentUser && !isAnonymousUser(currentUser)) {
+                    _pendingAdminPanel = false;
+                    const adminModal = document.getElementById('admin-login-modal');
+                    if (adminModal) adminModal.style.display = 'none';
+                    showToast(t('common.toast_admin_denied'));
+                    logout();
+                }
+
                 const adminProfileItem = document.getElementById('admin-dropdown-item-profile');
                 if (adminProfileItem) adminProfileItem.style.display = 'none';
                 const adminDivider = document.getElementById('admin-dropdown-divider');
@@ -1199,7 +1153,7 @@ function navigateFromURLParam() {
             showReferralPage();
         } else if (page === 'topup-history-page') {
             showTopupHistory();
-        } else if (page === 'admin-panel' && window.__isAdmin) {
+        } else if (page === 'admin-panel') {
             showAdminPanel();
         } else if (page === 'user-dashboard') {
             showDashboard();
@@ -1217,59 +1171,6 @@ function navigateFromURLParam() {
         // Home = My videos
         showDashboard();
     }
-}
-
-function handleUserLoggedOut() {
-    // Show login-required popup with banner video
-    const authModal = document.getElementById('auth-modal');
-    if (authModal) authModal.style.display = 'flex';
-    const v = document.getElementById('auth-banner-video');
-    if (v && !v.src) {
-        v.src = 'https://pub-2b53cd37b4a44642afdbb8bb470bde66.r2.dev/banner.mp4';
-    }
-
-    document.getElementById('login-btn').style.display = 'flex';
-    document.getElementById('user-profile-menu').style.display = 'none';
-    const navbarCoin = document.getElementById('navbar-coin-widget');
-    if (navbarCoin) navbarCoin.style.display = 'none';
-
-    // Toggle Dashboard sub-elements
-    const dashIn = document.getElementById('dashboard-logged-in');
-    const dashOut = document.getElementById('dashboard-auth-placeholder');
-    if (dashIn) dashIn.style.display = 'none';
-    if (dashOut) dashOut.style.display = 'block';
-
-    const topupPage = document.getElementById('topup-history-page');
-    if (topupPage) topupPage.style.display = 'none';
-    const referralPage = document.getElementById('referral-page');
-    if (referralPage) referralPage.style.display = 'none';
-    const adminProfileItem = document.getElementById('admin-dropdown-item-profile');
-    if (adminProfileItem) adminProfileItem.style.display = 'none';
-    const adminDivider = document.getElementById('admin-dropdown-divider');
-    if (adminDivider) adminDivider.style.display = 'none';
-
-    // [TỐI ƯU] Cleanup TẤT CẢ Firebase listener khi logout.
-    // Trước đây chỉ unsub referralEarnings -> các listener khác (myOrders, myTopups,
-    // userProfile, adminOrders, adminTopups, adminUsers) tiếp tục sống và đọc data
-    // dù user đã logout.
-    fbUnsubAll();
-
-    // Reset các flag/cache liên quan
-    window.__isAdmin = false;
-    window.__isSuperAdmin = false;
-    window.__currentUserData = null;
-    adminSubscribedOrderStatus = null;
-    adminSubscribedTopupStatus = null;
-    Object.keys(FB_CACHE).forEach(k => { delete FB_CACHE[k]; });
-
-    // Legacy var (giờ đã unsub trong fbUnsubAll, để null cho an toàn)
-    referralEarningsUnsubscribe = null;
-
-    dailyPromoRemaining = 0;
-    updateFirstOrderUI();
-
-    // Home = My videos (dashboard sẽ hiện placeholder login-required)
-    showDashboard();
 }
 
 function showDashboard() {
@@ -1291,12 +1192,24 @@ function showBuildChannel() {
 }
 
 function showAdminPanel() {
+    if (!currentUser || isAnonymousUser(currentUser)) {
+        _pendingAdminPanel = true;
+        showAdminLoginModal();
+        return;
+    }
+
+    const bootstrapAdmin = SUPER_ADMIN_EMAILS.includes(userEmailSafe(currentUser));
+    if (!window.__isAdmin && !bootstrapAdmin) {
+        _pendingAdminPanel = true;
+        showAdminLoginModal();
+        return;
+    }
+
+    _pendingAdminPanel = false;
     hideAllPages();
     document.getElementById('admin-panel').style.display = 'block';
     window.scrollTo(0, 0);
-    // [TỐI ƯU] Chỉ subscribe admin Firebase listener khi admin VÀO trang admin.
-    // Trước đây listener được tạo từ trong user-profile listener -> chạy sai chỗ.
-    if (window.__isAdmin) loadAdminPanel();
+    loadAdminPanel();
 }
 
 function showLanding() {
@@ -1329,8 +1242,7 @@ window.toggleDashboard = () => {
     }
 };
 
-window.loginUser = loginGuest;
-window.loginWithGoogle = loginWithGoogle;
+window.loginAdmin = loginAdmin;
 window.logoutUser = logout;
 window.showLanding = showLanding;
 window.showDashboard = showDashboard;
@@ -1693,7 +1605,6 @@ window.openModal = (id) => {
 };
 
 window.closeModal = (id) => {
-    if (id === 'auth-modal') return; // non-dismissible
     document.getElementById(id).style.display = 'none';
 };
 
@@ -1702,24 +1613,27 @@ window.openTopupModal = () => {
 };
 
 window.openPricingModal = () => {
-    if (!currentUser) return loginGuest();
-    window.openModal('pricing-modal');
-    
-    // TikTok Pixel: ViewContent (Viewing Topup Packages)
-    if (typeof ttq !== 'undefined') {
-        ttq.track('ViewContent', {
-            content_name: 'Topup Packages',
-            content_type: 'product_group',
-            content_id: 'all_packages'
-        });
-    }
-
-    // Firebase Analytics: view_item_list
-    logFirebaseEvent('view_item_list', { item_list_name: 'Topup Packages' });
+    ensureAnonymousAuth()
+        .then(() => {
+            if (!currentUser) return;
+            window.openModal('pricing-modal');
+            if (typeof ttq !== 'undefined') {
+                ttq.track('ViewContent', {
+                    content_name: 'Topup Packages',
+                    content_type: 'product_group',
+                    content_id: 'all_packages'
+                });
+            }
+            logFirebaseEvent('view_item_list', { item_list_name: 'Topup Packages' });
+        })
+        .catch(() => {});
 };
 
 window.selectTopup = async (id) => {
-    if (!currentUser) return loginGuest();
+    if (!currentUser) {
+        await ensureAnonymousAuth();
+        if (!currentUser) return;
+    }
 
     selectedTopupPackage = COIN_PACKAGES.find(p => p.id === id);
 
@@ -2106,11 +2020,8 @@ async function setupEventListeners() {
             e.preventDefault();
 
             if (!currentUser) {
-                // Nếu chưa đăng nhập thì hiện Auth Modal
-                const authModal = document.getElementById('auth-modal');
-                if (authModal) authModal.style.display = 'flex';
-                showToast(t('common.toast_login_required'));
-                return;
+                await ensureAnonymousAuth();
+                if (!currentUser) return;
             }
 
             const { db, doc, collection, runTransaction, serverTimestamp } = window.firebase;
@@ -4188,8 +4099,13 @@ export function renderAIModels() {
 window.renderAIModels = renderAIModels;
 
 window.createVideoWithModel = (modelId) => {
-    if (!currentUser) return loginGuest();
+    ensureAnonymousAuth().then(() => {
+        if (!currentUser) return;
+        window.createVideoWithModelAfterAuth(modelId);
+    });
+};
 
+window.createVideoWithModelAfterAuth = (modelId) => {
     // Lưu trữ Model ID đã chọn
     window.selectedAIModelId = modelId;
     const model = AI_MODELS.find(m => m.id === modelId);
