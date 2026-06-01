@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from firebase_admin import credentials, firestore
 from google.cloud.firestore_v1.base_query import FieldFilter
 from playwright.sync_api import sync_playwright
-from aidancing_api import AidancingApiClient
+from aidancing_api import AidancingApiClient, SessionExpiredError
 
 # --- CONFIGURATION ---
 cred = credentials.Certificate("serviceAccountKey.json")
@@ -52,46 +52,8 @@ _processing_cache_lock = threading.Lock()
 HEARTBEAT_SEC = int(os.environ.get("BOT_HEARTBEAT_SEC", "60"))
 
 
-class PersistentApiPool:
-    """Giữ 1 kết nối CDP + 1 tab nền suốt phiên bot — không mở/đóng Chrome mỗi lần poll."""
-
-    def __init__(self):
-        self._playwright = None
-        self._browser = None
-        self._api = None
-
-    def get(self):
-        if self._api is not None and self._api._page_alive():
-            return self._api
-        self.reset()
-        self._playwright = sync_playwright().start()
-        self._browser = launch_aidancing_browser(self._playwright)
-        self._api = AidancingApiClient(self._browser.context, persistent=True)
-        print("🔌 Session API cố định — 1 tab nền (fetch API, không reload dashboard)")
-        return self._api
-
-    def reset(self):
-        if self._api:
-            try:
-                self._api.shutdown()
-            except Exception:
-                pass
-        self._api = None
-        if self._browser:
-            try:
-                self._browser.close()
-            except Exception:
-                pass
-        self._browser = None
-        if self._playwright:
-            try:
-                self._playwright.stop()
-            except Exception:
-                pass
-        self._playwright = None
-
-
-_api_pool = PersistentApiPool()
+_http_client = None
+_http_client_lock = threading.Lock()
 
 _pw_queue = queue.Queue()
 _pw_worker_started = False
@@ -138,21 +100,27 @@ def run_playwright(fn, *args, **kwargs):
     return done["result"]
 
 
-def _persistent_api():
-    return run_playwright(_api_pool.get)
+def _get_http_client():
+    global _http_client
+    with _http_client_lock:
+        if _http_client is None:
+            _http_client = AidancingApiClient()
+        return _http_client
 
 
-def _reset_persistent_api():
-    run_playwright(_api_pool.reset)
+def _reset_http_client():
+    global _http_client
+    with _http_client_lock:
+        _http_client = None
 
 
-def _pw_create_job(model_id, char_path, vid_path):
-    api = _api_pool.get()
+def _http_create_job(model_id, char_path, vid_path):
+    api = _get_http_client()
     return api.create_job(model_id, char_path, vid_path)
 
 
-def _pw_poll_orders(orders_to_check):
-    api = _api_pool.get()
+def _http_poll_orders(orders_to_check):
+    api = _get_http_client()
     job_ids = [str(doc.to_dict().get('aidancingJobId')) for doc in orders_to_check]
     jobs_map = api.find_jobs_by_ids(job_ids)
     for doc in orders_to_check:
@@ -247,24 +215,6 @@ def _monitor_sleep_seconds(eligible_count, processing_count):
         return wait_render
     return active
 
-
-def _warm_api_session_loop():
-    if not use_api_mode():
-        return
-    _ensure_playwright_worker()
-    while True:
-        if is_bot_enabled():
-            try:
-                run_playwright(_api_pool.get)
-                print("✅ Tab nền aidancing sẵn sàng — poll qua fetch (không F5 dashboard)")
-                return
-            except Exception as e:
-                print(f"⚠️ Chờ Chrome CDP để khởi tạo session API: {e}")
-                try:
-                    run_playwright(_api_pool.reset)
-                except Exception:
-                    pass
-        time.sleep(20)
 
 def ensure_cdp_available(cdp_url, timeout=3):
     try:
@@ -875,7 +825,8 @@ def send_completion_email(order_id, order_data, result_link):
         print(f"❌ Lỗi kết nối khi gửi email thông báo qua EmailJS: {e}")
 
 def use_api_mode():
-    return os.environ.get("BOT_MODE", "browser").strip().lower() == "api"
+    """Pure HTTP — không cần Chrome/Playwright (cookie AIDANCING_COOKIE)."""
+    return os.environ.get("BOT_MODE", "browser").strip().lower() in ("api", "http")
 
 def _complete_order_with_video(doc, local_vid):
     """Upload R2 + cập nhật Firestore + thông báo."""
@@ -915,25 +866,25 @@ def _complete_order_with_video(doc, local_vid):
     return True
 
 def check_finished_orders_api():
-    """Monitor qua GET /api/proxy/jobs — fetch trên tab nền, không reload."""
+    """Monitor qua GET /api/proxy/jobs — Pure HTTP."""
     if not is_bot_enabled() or browser_lock.locked():
         return
     orders_to_check, _ = _processing_monitor_state()
     if not orders_to_check:
         return
 
-    print(f"\n🔍 [MONITOR/API] Poll {len(orders_to_check)} đơn (fetch, không reload trang)...")
+    print(f"\n🔍 [MONITOR/HTTP] Poll {len(orders_to_check)} đơn...")
     with browser_lock:
         try:
-            run_playwright(_pw_poll_orders, orders_to_check)
+            _http_poll_orders(orders_to_check)
+        except SessionExpiredError as e:
+            print(f"❌ Session hết hạn: {e}")
+            _reset_http_client()
         except Exception as e:
             err = str(e)
-            print(f"❌ Lỗi monitor API: {e}")
-            if any(x in err for x in ('ECONNREFUSED', 'Chrome CDP', 'connect_over_cdp', 'Target closed', 'different thread')):
-                try:
-                    run_playwright(_api_pool.reset)
-                except Exception:
-                    pass
+            print(f"❌ Lỗi monitor HTTP: {e}")
+            if any(x in err.lower() for x in ('401', '403', 'session expired', 'aidancing_cookie')):
+                _reset_http_client()
 
 def _mark_order_processing(doc_ref, job_id):
     """Chỉ chuyển processing sau khi aidancing đã nhận job."""
@@ -1023,9 +974,9 @@ def submit_to_aidancing(order_id):
             if use_api_mode():
                 try:
                     model_id = data.get('modelId', '124')
-                    print(f"🚀 [API] Nạp đơn model {model_id}...")
-                    job_id = run_playwright(_pw_create_job, model_id, char_path, vid_path)
-                    print(f"🆔 [API] Job mới: {job_id}")
+                    print(f"🚀 [HTTP] Nạp đơn model {model_id}...")
+                    job_id = _http_create_job(model_id, char_path, vid_path)
+                    print(f"🆔 [HTTP] Job mới: {job_id}")
                     _mark_order_processing(doc_ref, job_id)
                     _session_error_backoff.pop(order_id, None)
                     print(f"✅ Đơn {order_id} → processing (aidancing đã nhận job)")
@@ -1035,20 +986,21 @@ def submit_to_aidancing(order_id):
                             f"⚙️ <b>ĐƠN HÀNG ĐANG XỬ LÝ</b>\n\n"
                             f"🆔 Mã đơn: #{short_id}\n"
                             f"🤖 Job ID aidancing: <code>{job_id}</code>\n"
-                            f"⏳ Đang render (API mode)..."
+                            f"⏳ Đang render (HTTP mode)..."
                         )
                         send_telegram_message(msg)
                     except Exception:
                         pass
+                except SessionExpiredError as e:
+                    print(f"❌ Session hết hạn: {e}")
+                    _reset_http_client()
+                    apply_bot_error_update(doc_ref, order_id, data, str(e), 'nạp HTTP')
                 except Exception as e:
-                    print(f"❌ Lỗi nạp API: {e}")
+                    print(f"❌ Lỗi nạp HTTP: {e}")
                     err = str(e)
-                    if any(x in err for x in ('ECONNREFUSED', 'Chrome CDP chưa chạy', 'connect_over_cdp', 'Target closed', 'different thread')):
-                        try:
-                            run_playwright(_api_pool.reset)
-                        except Exception:
-                            pass
-                    apply_bot_error_update(doc_ref, order_id, data, err, 'nạp API')
+                    if any(x in err.lower() for x in ('401', '403', 'session expired', 'aidancing_cookie')):
+                        _reset_http_client()
+                    apply_bot_error_update(doc_ref, order_id, data, err, 'nạp HTTP')
                 finally:
                     if char_path and os.path.exists(char_path):
                         os.remove(char_path)
@@ -1382,8 +1334,8 @@ def start_bot():
     global BOT_NAME
     parser = argparse.ArgumentParser(description='Wallpaper/Nhay Cloud order bot — aidancing.net')
     parser.add_argument('--name', required=True, help='Tên bot duy nhất (vd: aidancing-vps1, bot-may-nha)')
-    parser.add_argument('--mode', choices=['browser', 'api'], default=None,
-                        help='browser=scrape dashboard (mặc định), api=gọi /api/proxy/jobs')
+    parser.add_argument('--mode', choices=['browser', 'api', 'http'], default=None,
+                        help='browser=Playwright; api/http=Pure HTTP (AIDANCING_COOKIE, không Chrome)')
     args = parser.parse_args()
     if args.mode:
         os.environ['BOT_MODE'] = args.mode
@@ -1404,8 +1356,11 @@ def start_bot():
     start_processing_listener()
 
     if use_api_mode():
-        _ensure_playwright_worker()
-        threading.Thread(target=_warm_api_session_loop, daemon=True).start()
+        try:
+            _get_http_client()
+            print("✅ Pure HTTP — AIDANCING_COOKIE (không cần Chrome/CDP)")
+        except ValueError as e:
+            print(f"⚠️  Chưa cấu hình cookie: {e}")
 
     def monitor_loop():
         while True:
