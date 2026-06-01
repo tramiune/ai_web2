@@ -1,3 +1,92 @@
+/* In-app browser (TikTok / Facebook) — open in Chrome/Safari */
+.inapp-browser-banner {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 10050;
+    background: linear-gradient(135deg, rgba(138, 43, 226, 0.95), rgba(75, 0, 130, 0.95));
+    border-bottom: 1px solid rgba(255, 255, 255, 0.15);
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.35);
+    padding: 0.65rem 0.75rem;
+    animation: fadeIn 0.35s ease;
+}
+
+.inapp-browser-banner__inner {
+    max-width: var(--container-max);
+    margin: 0 auto;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 0.75rem;
+}
+
+.inapp-browser-banner__text {
+    flex: 1 1 180px;
+    margin: 0;
+    font-size: 0.8rem;
+    line-height: 1.35;
+    color: #fff;
+    font-weight: 500;
+}
+
+.inapp-browser-banner__actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+.inapp-browser-banner__open {
+    padding: 0.45rem 0.85rem;
+    font-size: 0.78rem;
+    white-space: nowrap;
+}
+
+.inapp-browser-banner__copy {
+    padding: 0.45rem 0.7rem;
+    font-size: 0.78rem;
+    border-radius: var(--radius-sm);
+    border: 1px solid rgba(255, 255, 255, 0.35);
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+    cursor: pointer;
+}
+
+.inapp-browser-banner__close {
+    width: 2rem;
+    height: 2rem;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    background: rgba(0, 0, 0, 0.2);
+    color: #fff;
+    font-size: 1.25rem;
+    line-height: 1;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
+body.has-inapp-banner {
+    padding-top: 3.5rem;
+}
+
+body.has-inapp-banner .navbar {
+    top: 3.5rem;
+}
+
+@media (min-width: 640px) {
+    body.has-inapp-banner {
+        padding-top: 3.25rem;
+    }
+    body.has-inapp-banner .navbar {
+        top: 3.25rem;
+    }
+    .inapp-browser-banner__text {
+        font-size: 0.85rem;
+    }
+}
+
 /* Maintenance & Delay Styles */
 .maintenance-banner {
     background: rgba(255, 152, 0, 0.1);

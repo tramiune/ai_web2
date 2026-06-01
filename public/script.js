@@ -325,6 +325,34 @@ function logFirebaseEvent(name, params = {}) {
     }
 }
 
+function metaPixelId() {
+    return (window.ANALYTICS_CONFIG && window.ANALYTICS_CONFIG.metaPixelId) || '';
+}
+
+function isMetaPixelReady() {
+    return typeof fbq === 'function' && !!metaPixelId();
+}
+
+function metaEventId(prefix) {
+    const safe = String(prefix || 'evt').replace(/\s+/g, '_');
+    return `${safe}_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
+}
+
+function trackMetaEvent(eventName, params = {}) {
+    if (!isMetaPixelReady()) return;
+    const payload = { ...params };
+    if (!payload.eventID) payload.eventID = metaEventId(eventName);
+    fbq('track', eventName, payload);
+    console.log(`📘 Meta Pixel: ${eventName}`, payload);
+}
+
+function updateMetaAdvancedMatching(user) {
+    if (!isMetaPixelReady() || !user?.email) return;
+    const em = String(user.email).trim().toLowerCase();
+    if (!em) return;
+    fbq('init', metaPixelId(), { em });
+}
+
 export function t(path, params = {}) {
     const langs = [currentLang || 'vi', 'en', 'vi'];
     for (const lang of langs) {
@@ -485,6 +513,9 @@ function clearPendingReferralCode() {
 
 // --- App Initialization ---
 export async function initAppLogic() {
+    if (!metaPixelId()) {
+        console.warn('[Meta Pixel] Chưa cấu hình metaPixelId trong public/analytics-config.js — Facebook Ads sẽ không nhận event.');
+    }
     try {
         currentLang = await resolveInitialLanguage();
     } catch (e) {
@@ -610,16 +641,132 @@ function showAdminAuthModal() {
     applyTranslations();
 }
 
-// --- Browser Detection ---
-function detectInAppBrowser() {
-    const ua = navigator.userAgent || navigator.vendor || window.opera;
-    const isTikTok = /TikTok/i.test(ua);
-    const isInApp = isTikTok || /FBAV|FBAN|Messenger|Instagram|Line|WhatsApp|Telegram|MicroMessenger/i.test(ua);
+// --- In-app browser (TikTok / Facebook / …) ---
+function isInAppBrowser() {
+    const ua = navigator.userAgent || navigator.vendor || window.opera || '';
+    return /TikTok|FBAV|FBAN|Instagram|Messenger|Line\/|WhatsApp|Telegram|MicroMessenger|Twitter|LinkedInApp/i.test(ua);
+}
 
-    // Special logic: Hide Google Login if not Chrome/Safari or if In-App
+function isStandaloneBrowser() {
+    const ua = navigator.userAgent || '';
     const isChrome = (/Chrome/i.test(ua) || /CriOS/i.test(ua)) && !/Edge|OPR|Edg|SamsungBrowser|Vivaldi|MiuiBrowser/i.test(ua);
     const isSafari = /Safari/i.test(ua) && !/Chrome|CriOS/i.test(ua) && !/SamsungBrowser|MiuiBrowser/i.test(ua);
-    const isSupported = (isChrome || isSafari) && !isInApp;
+    return (isChrome || isSafari) && !isInAppBrowser();
+}
+
+function showInAppBrowserBanner() {
+    if (!isInAppBrowser() || sessionStorage.getItem('inapp-banner-dismissed') === '1') return;
+    const banner = document.getElementById('inapp-browser-banner');
+    if (!banner) return;
+    banner.hidden = false;
+    document.body.classList.add('has-inapp-banner');
+    applyTranslations();
+}
+
+window.dismissInAppBrowserBanner = () => {
+    const banner = document.getElementById('inapp-browser-banner');
+    if (banner) banner.hidden = true;
+    document.body.classList.remove('has-inapp-banner');
+    sessionStorage.setItem('inapp-banner-dismissed', '1');
+};
+
+window.copyPageLinkForExternal = async (url) => {
+    const link = url || window.location.href;
+    try {
+        if (navigator.clipboard?.writeText) {
+            await navigator.clipboard.writeText(link);
+        } else {
+            const ta = document.createElement('textarea');
+            ta.value = link;
+            ta.style.position = 'fixed';
+            ta.style.left = '-9999px';
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand('copy');
+            document.body.removeChild(ta);
+        }
+        showToast(t('modals.inapp_link_copied'));
+        return true;
+    } catch (e) {
+        showToast(t('common.toast_copy_failed', { msg: e?.message || '' }));
+        return false;
+    }
+};
+
+async function copyPageLinkSilent(url) {
+    const link = url || window.location.href;
+    try {
+        if (navigator.clipboard?.writeText) {
+            await navigator.clipboard.writeText(link);
+        } else {
+            const ta = document.createElement('textarea');
+            ta.value = link;
+            ta.style.position = 'fixed';
+            ta.style.left = '-9999px';
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand('copy');
+            document.body.removeChild(ta);
+        }
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+window.openExternalBrowser = async (targetUrl) => {
+    const url = targetUrl || window.location.href;
+    const ua = navigator.userAgent || '';
+    const isAndroid = /Android/i.test(ua);
+    const isIOS = /iPhone|iPad|iPod/i.test(ua);
+
+    await copyPageLinkSilent(url);
+
+    if (isAndroid) {
+        try {
+            const parsed = new URL(url);
+            const intent =
+                `intent://${parsed.host}${parsed.pathname}${parsed.search}${parsed.hash}` +
+                `#Intent;scheme=${parsed.protocol.replace(':', '')};` +
+                `package=com.android.chrome;` +
+                `S.browser_fallback_url=${encodeURIComponent(url)};end`;
+            window.location.href = intent;
+            showToast(t('modals.inapp_open_attempt'));
+            return;
+        } catch (e) {
+            console.warn('[OpenBrowser] Android intent failed:', e);
+        }
+    }
+
+    if (isIOS) {
+        const noProto = url.replace(/^https?:\/\//, '');
+        try {
+            window.location.href = `x-safari-https://${noProto}`;
+            showToast(t('modals.inapp_open_attempt'));
+            return;
+        } catch (e) {
+            console.warn('[OpenBrowser] iOS Safari scheme failed:', e);
+        }
+        try {
+            window.location.href = `googlechromes://${noProto}`;
+            showToast(t('modals.inapp_open_attempt'));
+            return;
+        } catch (e) {
+            console.warn('[OpenBrowser] iOS Chrome scheme failed:', e);
+        }
+    }
+
+    showToast(t('modals.inapp_open_attempt'));
+};
+
+// --- Browser Detection ---
+function detectInAppBrowser() {
+    const isInApp = isInAppBrowser();
+    const isSupported = isStandaloneBrowser();
+
+    if (isInApp) {
+        showInAppBrowserBanner();
+    }
 
     if (!isSupported) {
         const googleBtn = document.getElementById('google-login-btn');
@@ -1036,6 +1183,7 @@ async function handleUserLoggedIn(user) {
         });
         console.log("🎯 TikTok Pixel: Identified user for Advanced Matching");
     }
+    updateMetaAdvancedMatching(user);
 
     if (user.email) {
         trackAnalyticsEvent('login', { method: isAnonymousUser(user) ? 'anonymous' : 'google' });
@@ -1089,6 +1237,13 @@ async function handleUserLoggedIn(user) {
         if (referredBy) newUserPayload.referredBy = referredBy;
 
         await setDoc(userRef, newUserPayload);
+
+        trackMetaEvent('CompleteRegistration', {
+            value: 0,
+            currency: 'VND',
+            status: true,
+            content_name: isAnonymousUser(user) ? 'anonymous' : (user.providerData?.[0]?.providerId || 'signup')
+        });
 
         // Clear the pending ref code after a successful signup attempt.
         if (referredBy) {
@@ -1148,6 +1303,15 @@ async function handleUserLoggedIn(user) {
                         content_id: purchaseId
                     });
                 }
+
+                trackMetaEvent('Purchase', {
+                    value: purchaseValue,
+                    currency: 'VND',
+                    content_ids: [purchaseId],
+                    content_name: purchaseName,
+                    content_type: 'product',
+                    num_items: 1
+                });
 
             }
 
@@ -1700,6 +1864,12 @@ window.openPricingModal = () => {
         });
     }
 
+    trackMetaEvent('ViewContent', {
+        content_name: 'Topup Packages',
+        content_type: 'product_group',
+        content_ids: ['all_packages']
+    });
+
     // Firebase Analytics: view_item_list
     logFirebaseEvent('view_item_list', { item_list_name: 'Topup Packages' });
 };
@@ -1720,6 +1890,15 @@ window.selectTopup = async (id) => {
             content_id: selectedTopupPackage.id
         });
     }
+
+    trackMetaEvent('InitiateCheckout', {
+        value: selectedTopupPackage.amount,
+        currency: 'VND',
+        content_ids: [selectedTopupPackage.id],
+        content_name: selectedTopupPackage.name,
+        content_type: 'product',
+        num_items: 1
+    });
 
     logFirebaseEvent('begin_checkout', {
         value: selectedTopupPackage.amount,
@@ -1847,6 +2026,12 @@ window.openOrderModal = () => {
             content_id: 'ai_video_generation'
         });
     }
+
+    trackMetaEvent('ViewContent', {
+        content_name: 'AI Video Service',
+        content_type: 'product',
+        content_ids: ['ai_video_generation']
+    });
 };
 
 function updateFirstOrderUI() {
@@ -2651,6 +2836,14 @@ async function setupEventListeners() {
                                     content_id: orderId
                                 });
                             }
+
+                            trackMetaEvent('Lead', {
+                                value: model.cost * 1000,
+                                currency: 'VND',
+                                content_name: serviceLabelPixel,
+                                content_ids: [orderId],
+                                content_category: 'ai_video_order'
+                            });
 
                             // Firebase Analytics: generate_lead
                             logFirebaseEvent('generate_lead', {
