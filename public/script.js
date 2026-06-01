@@ -1945,7 +1945,8 @@ function tiktokErrorMessage(code) {
         fetch_failed: 'modals.tiktok_fetch_failed',
         video_download: 'modals.tiktok_fetch_failed',
         tikwm_parse: 'modals.tiktok_fetch_failed',
-        no_video: 'modals.tiktok_fetch_failed'
+        no_video: 'modals.tiktok_fetch_failed',
+        trim_failed: 'modals.tiktok_trim_failed'
     }[code] || 'modals.tiktok_fetch_failed';
     return t(msgKey);
 }
@@ -2106,6 +2107,63 @@ async function trimVideoBlobToMaxSec(blob, maxSec = MAX_REFERENCE_VIDEO_SEC) {
     };
 }
 
+async function applyTikTokVideoFromUrl(pageUrl, options = {}) {
+    const { onProgress } = options;
+    const { blob: initialBlob, duration: metaDuration } = await downloadTikTokVideoBlob(pageUrl);
+    let blob = initialBlob;
+    if (blob.size > 90 * 1024 * 1024) {
+        throw Object.assign(new Error(t('modals.video_size_limit')), { code: 'size_limit' });
+    }
+
+    let blobDuration = metaDuration;
+    if (!isFinite(blobDuration)) {
+        try {
+            blobDuration = await getBlobVideoDurationSec(blob);
+        } catch (_) {
+            blobDuration = MAX_REFERENCE_VIDEO_SEC + 1;
+        }
+    }
+    const needsTrim = blobDuration > MAX_REFERENCE_VIDEO_SEC + 0.15;
+
+    if (needsTrim) {
+        onProgress?.('trimming');
+        try {
+            const trimmed = await trimVideoBlobToMaxSec(blob, MAX_REFERENCE_VIDEO_SEC);
+            blob = trimmed.blob;
+        } catch (trimErr) {
+            console.error('[TikTok] trim failed:', trimErr);
+            throw Object.assign(new Error(t('modals.tiktok_trim_failed')), { code: 'trim_failed' });
+        }
+    }
+
+    const file = new File([blob], 'tiktok_video.mp4', { type: 'video/mp4' });
+    const fileInput = document.getElementById('file-video');
+    if (!fileInput) throw Object.assign(new Error(t('common.error')), { code: 'fetch_failed' });
+
+    const dt = new DataTransfer();
+    dt.items.add(file);
+    fileInput.files = dt.files;
+
+    const templateInput = document.getElementById('selected-template-url');
+    if (templateInput) templateInput.value = '';
+    window.currentVideoSource = 'upload';
+
+    renderVideoFilePreview('preview-tiktok-video-container', file, {
+        changeKey: 'modals.tiktok_pick_another',
+        onChange: () => {
+            fileInput.value = '';
+            const tiktokPreview = document.getElementById('preview-tiktok-video-container');
+            if (tiktokPreview) {
+                tiktokPreview.innerHTML = '';
+                syncUploadZonePreviewState(tiktokPreview);
+            }
+            document.getElementById('tiktok-video-url')?.focus();
+        }
+    });
+
+    return { file, trimmed: needsTrim };
+}
+
 window.fetchTikTokVideo = async () => {
     const input = document.getElementById('tiktok-video-url');
     const btn = document.getElementById('tiktok-fetch-btn');
@@ -2120,62 +2178,15 @@ window.fetchTikTokVideo = async () => {
         btn.textContent = t('modals.tiktok_fetching');
     }
     showToast(t('modals.tiktok_fetching'));
-    let needsTrim = false;
 
     try {
-        const { blob: initialBlob, duration: metaDuration } = await downloadTikTokVideoBlob(pageUrl);
-        let blob = initialBlob;
-        if (blob.size > 90 * 1024 * 1024) {
-            throw new Error(t('modals.video_size_limit'));
-        }
-
-        let blobDuration = metaDuration;
-        if (!isFinite(blobDuration)) {
-            try {
-                blobDuration = await getBlobVideoDurationSec(blob);
-            } catch (_) {
-                blobDuration = MAX_REFERENCE_VIDEO_SEC + 1;
-            }
-        }
-        needsTrim = blobDuration > MAX_REFERENCE_VIDEO_SEC + 0.15;
-
-        if (needsTrim) {
-            if (btn) btn.textContent = t('modals.tiktok_trimming');
-            showToast(t('modals.tiktok_trimming'));
-            try {
-                const trimmed = await trimVideoBlobToMaxSec(blob, MAX_REFERENCE_VIDEO_SEC);
-                blob = trimmed.blob;
-            } catch (trimErr) {
-                console.error('[TikTok] trim failed:', trimErr);
-                throw new Error(t('modals.tiktok_trim_failed'));
-            }
-        }
-
-        const file = new File([blob], 'tiktok_video.mp4', { type: 'video/mp4' });
-        const fileInput = document.getElementById('file-video');
-        if (!fileInput) throw new Error(t('common.error'));
-
-        const dt = new DataTransfer();
-        dt.items.add(file);
-        fileInput.files = dt.files;
-
-        const templateInput = document.getElementById('selected-template-url');
-        if (templateInput) templateInput.value = '';
-        window.currentVideoSource = 'upload';
-
-        renderVideoFilePreview('preview-tiktok-video-container', file, {
-            changeKey: 'modals.tiktok_pick_another',
-            onChange: () => {
-                fileInput.value = '';
-                const tiktokPreview = document.getElementById('preview-tiktok-video-container');
-                if (tiktokPreview) {
-                    tiktokPreview.innerHTML = '';
-                    syncUploadZonePreviewState(tiktokPreview);
-                }
-                document.getElementById('tiktok-video-url')?.focus();
+        const { trimmed } = await applyTikTokVideoFromUrl(pageUrl, {
+            onProgress: (phase) => {
+                if (phase === 'trimming' && btn) btn.textContent = t('modals.tiktok_trimming');
+                if (phase === 'trimming') showToast(t('modals.tiktok_trimming'));
             }
         });
-        showToast(needsTrim ? t('modals.tiktok_fetch_trimmed') : t('modals.tiktok_fetch_success'));
+        showToast(trimmed ? t('modals.tiktok_fetch_trimmed') : t('modals.tiktok_fetch_success'));
     } catch (e) {
         console.error('[TikTok] fetch failed:', e);
         showToast(e.code ? tiktokErrorMessage(e.code) : (e.message || t('modals.tiktok_fetch_failed')));
@@ -2435,21 +2446,12 @@ async function setupEventListeners() {
 
             try {
                 const charFile = document.getElementById('file-char')?.files?.[0];
-                const videoFile = document.getElementById('file-video')?.files?.[0];
+                let videoFile = document.getElementById('file-video')?.files?.[0];
                 const templateUrl = document.getElementById('selected-template-url')?.value || '';
+                const tiktokUrl = document.getElementById('tiktok-video-url')?.value?.trim() || '';
                 const modelKeySelected = document.querySelector('input[name="model-type"]:checked')?.value || 'fast';
                 const serviceType = document.querySelector('input[name="service-type"]:checked')?.value || 'motion-to-char';
                 let modelIdOverride = null;
-
-                // Model thường: auto select Aidancing id by uploaded video duration
-                // <10s  -> 125
-                // 10-20 -> 124
-                if (modelKeySelected === 'fast' && window.currentVideoSource === 'upload' && videoFile) {
-                    const dur = await getVideoDurationSeconds(videoFile);
-                    if (typeof dur === 'number') {
-                        modelIdOverride = dur < 10 ? '125' : '124';
-                    }
-                }
 
                 if (!charFile) {
                     const charZone = document.querySelector('#file-char')?.closest('.upload-zone');
@@ -2460,8 +2462,50 @@ async function setupEventListeners() {
                     }
                     return showToast(t('modals.char_upload_required'));
                 }
-                if (window.currentVideoSource === 'upload' && !videoFile) return showToast(t('modals.video_upload_required'));
-                if (window.currentVideoSource === 'library' && !templateUrl) return showToast(t('modals.video_upload_required'));
+
+                if (window.currentVideoSource === 'library' && !templateUrl) {
+                    return showToast(t('modals.video_upload_required'));
+                }
+
+                if (!videoFile && !templateUrl && tiktokUrl) {
+                    if (!isTikTokPageUrl(tiktokUrl)) {
+                        return showToast(t('modals.tiktok_url_invalid'));
+                    }
+                    submitBtn.disabled = true;
+                    const mainTextFetch = submitBtn.querySelector('[data-i18n="hero.cta_create"]');
+                    if (mainTextFetch) mainTextFetch.innerText = t('modals.tiktok_fetching');
+                    showToast(t('modals.tiktok_fetch_on_submit'));
+                    try {
+                        const result = await applyTikTokVideoFromUrl(tiktokUrl, {
+                            onProgress: (phase) => {
+                                if (phase === 'trimming' && mainTextFetch) {
+                                    mainTextFetch.innerText = t('modals.tiktok_trimming');
+                                }
+                            }
+                        });
+                        videoFile = result.file;
+                    } catch (tiktokErr) {
+                        console.error('[TikTok] auto fetch on submit:', tiktokErr);
+                        submitBtn.disabled = false;
+                        updateFirstOrderUI();
+                        showToast(tiktokErr.code ? tiktokErrorMessage(tiktokErr.code) : (tiktokErr.message || t('modals.tiktok_fetch_failed')));
+                        return;
+                    }
+                }
+
+                if (window.currentVideoSource === 'upload' && !videoFile) {
+                    return showToast(t('modals.video_upload_required'));
+                }
+
+                // Model thường: auto select Aidancing id by uploaded video duration
+                // <10s  -> 125
+                // 10-20 -> 124
+                if (modelKeySelected === 'fast' && window.currentVideoSource === 'upload' && videoFile) {
+                    const dur = await getVideoDurationSeconds(videoFile);
+                    if (typeof dur === 'number') {
+                        modelIdOverride = dur < 10 ? '125' : '124';
+                    }
+                }
 
                 // Kiểm tra lại lần cuối trước khi upload
                 if (charFile.size > 10 * 1024 * 1024) return showToast(t('modals.char_note'));
