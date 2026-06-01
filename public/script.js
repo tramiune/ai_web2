@@ -552,12 +552,14 @@ export async function initAppLogic() {
     applyTranslations();
 }
 
+const TELEGRAM_SUPPORT_URL = 'https://t.me/motionaistudio';
+
 function setupAdminTelegramUnlock() {
     const fab = document.getElementById('telegram-fab');
     if (!fab) return;
 
     let holdTimer = null;
-    let holdTriggered = false;
+    let suppressClick = false;
 
     const clearHold = () => {
         if (holdTimer) {
@@ -568,26 +570,33 @@ function setupAdminTelegramUnlock() {
 
     const startHold = () => {
         clearHold();
-        holdTriggered = false;
+        suppressClick = false;
         holdTimer = setTimeout(() => {
             holdTimer = null;
-            holdTriggered = true;
+            suppressClick = true;
             showAdminAuthModal();
         }, ADMIN_TELEGRAM_HOLD_MS);
     };
 
-    fab.addEventListener('mousedown', startHold);
-    fab.addEventListener('touchstart', startHold, { passive: true });
-    fab.addEventListener('mouseup', clearHold);
-    fab.addEventListener('mouseleave', clearHold);
-    fab.addEventListener('touchend', clearHold);
-    fab.addEventListener('touchcancel', clearHold);
+    fab.addEventListener('contextmenu', (e) => e.preventDefault());
+
+    fab.addEventListener('pointerdown', (e) => {
+        if (e.pointerType === 'mouse' && e.button !== 0) return;
+        fab.setPointerCapture?.(e.pointerId);
+        startHold();
+    });
+    fab.addEventListener('pointerup', clearHold);
+    fab.addEventListener('pointerleave', clearHold);
+    fab.addEventListener('pointercancel', clearHold);
+
     fab.addEventListener('click', (e) => {
-        if (holdTriggered) {
-            e.preventDefault();
-            holdTriggered = false;
+        e.preventDefault();
+        if (suppressClick) {
+            suppressClick = false;
+            return;
         }
-    }, true);
+        window.open(TELEGRAM_SUPPORT_URL, '_blank', 'noopener,noreferrer');
+    });
 }
 
 function showAdminAuthModal() {
@@ -1140,7 +1149,6 @@ async function handleUserLoggedIn(user) {
                     });
                 }
 
-                sendTelegramMessage(`💰 <b>NẠP COIN THÀNH CÔNG!</b>\n👤 Khách: ${escapeHTML(data.displayName)}\n📧 Email: ${escapeHTML(data.email)}\n✨ Đã cộng: +${addedCoins} Coin\n💰 Số dư mới: ${currentCoins} Coin`);
             }
 
             document.querySelectorAll('.coin-balance-text').forEach(el => el.innerText = currentCoins);
@@ -2186,7 +2194,7 @@ async function setupEventListeners() {
                             }
 
                             // 3. Finalize Transaction (Deduct coins and create order)
-                            const orderId = await runTransaction(db, async (transaction) => {
+                            const { orderId, remainingCoins } = await runTransaction(db, async (transaction) => {
                                 const userDoc = await transaction.get(userRef);
                                 if (!userDoc.exists()) throw t('common.error');
 
@@ -2207,15 +2215,16 @@ async function setupEventListeners() {
 
                                 const aspectRatioEl = document.querySelector('input[name="aspect-ratio"]:checked');
                                 const aspectRatio = aspectRatioEl ? aspectRatioEl.value : '16:9';
+                                const coinsAfter = currentCoins - finalCost;
 
                                 if (finalCost > 0) {
-                                    transaction.update(userRef, { coins: currentCoins - finalCost });
+                                    transaction.update(userRef, { coins: coinsAfter });
                                 }
 
                                 const orderPayload = {
                                     userId: currentUser.uid,
-                                    userEmail: currentUser.email,
-                                    userName: currentUser.displayName,
+                                    userEmail: currentUser.email || '',
+                                    userName: currentUser.displayName || userDisplayLabel(currentUser),
                                     packageName: orderModel.name,
                                     modelId: orderModel.modelId,
                                     serviceType: serviceType,
@@ -2237,7 +2246,7 @@ async function setupEventListeners() {
 
                                 const orderRef = doc(collection(db, "orders"));
                                 transaction.set(orderRef, orderPayload);
-                                return orderRef.id;
+                                return { orderId: orderRef.id, remainingCoins: coinsAfter };
                             });
 
                             showToast(t('common.toast_order_created'));
@@ -2274,13 +2283,16 @@ async function setupEventListeners() {
                             });
                             showDashboard();
                             const serviceLabel = SERVICE_TYPE_MAP()[serviceType] || serviceType;
+                            const customerName = escapeHTML(currentUser.displayName || userDisplayLabel(currentUser));
+                            const customerEmail = escapeHTML(currentUser.email || '—');
                             const msg = `🚀 <b>ĐƠN HÀNG MỚI: ${serviceLabel.toUpperCase()}</b>\n\n` +
                                 `🆔 Mã đơn: #${orderId}\n` +
-                                `👤 Khách: ${escapeHTML(currentUser.displayName)}\n` +
-                                `📧 Email: ${escapeHTML(currentUser.email)}\n` +
+                                `👤 Khách: ${customerName}\n` +
+                                `📧 Email: ${customerEmail}\n` +
                                 `🔧 Dịch vụ: <b>${serviceLabel}</b>\n` +
                                 `📦 Gói: ${model.name}\n` +
                                 `💰 Chi phí: ${model.cost} Coin\n` +
+                                `💳 Coin còn lại: <b>${remainingCoins}</b> Coin\n` +
                                 `🖼 <a href="${charUrl}">Xem ảnh nhân vật</a>\n` +
                                 `📹 <a href="${videoUrl}">Xem video tham chiếu</a>`;
                             sendTelegramMessage(msg);
