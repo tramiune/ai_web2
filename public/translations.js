@@ -190,8 +190,9 @@ window.TRANSLATIONS = {
             pay_vietqr: "Chuyển khoản",
             pay_vietqr_sub: "",
             pay_intl: "Thẻ quốc tế",
+            starter_already_used: "Bạn đã dùng gói 10.000đ. Chọn gói 100.000đ trở lên nhé.",
             notes: {
-                starter_v2: "Gói giới hạn",
+                starter_v2: "Chỉ nạp được 1 lần",
                 creator: "Tặng 50 Coin",
                 studio: "Tặng 300 Coin",
                 "pro-studio": "Tặng 600 Coin"
@@ -857,8 +858,9 @@ window.TRANSLATIONS = {
             pay_vietqr: "Bank transfer",
             pay_vietqr_sub: "",
             pay_intl: "Intl card",
+            starter_already_used: "You already used the 10,000₫ pack. Please choose 100,000₫ or higher.",
             notes: {
-                starter_v2: "Limited package",
+                starter_v2: "One-time only",
                 creator: "Bonus 50 Coins",
                 studio: "Bonus 300 Coins",
                 "pro-studio": "Bonus 600 Coins"

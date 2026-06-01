@@ -22,7 +22,7 @@ function safeToDate(field) {
 
 // --- Data Constants ---
 const COIN_PACKAGES = [
-    { id: 'starter_v2', name: 'Starter',    coins: 20,   price: '40.000đ',   amount: 40000,   hasBonus: false },
+    { id: 'starter_v2', name: 'Starter',    coins: 10,   price: '10.000đ',   amount: 10000,   hasBonus: false, oneTime: true },
     { id: 'creator',    name: 'Creator',    coins: 100,  price: '100.000đ',  amount: 100000, featured: true, hasBonus: true },
     { id: 'studio',     name: 'Studio',     coins: 550,  price: '500.000đ',  amount: 500000,  hasBonus: true },
     { id: 'pro-studio', name: 'Enterprise', coins: 1100, price: '1.000.000đ', amount: 1000000, hasBonus: true }
@@ -208,6 +208,40 @@ function resolvePromoCost(orders, baseCost) {
     };
 }
 let initialCoinsBeforeTopup = 0; // Để theo dõi số dư trước khi nạp
+let starterTopupUsed = false; // Đã nạp gói starter_v2 (10k) — ẩn gói sau lần đầu
+
+function isStarterTopupRecord(data) {
+    if (!data) return false;
+    if (data.packageId === 'starter_v2') return true;
+    if (data.amount === 10000 && data.coins === 10) return true;
+    return false;
+}
+
+async function refreshStarterTopupEligibility() {
+    if (!currentUser) {
+        starterTopupUsed = false;
+        return;
+    }
+    try {
+        const { db, collection, query, where, getDocs } = window.firebase;
+        const q = query(
+            collection(db, 'topups'),
+            where('userId', '==', currentUser.uid),
+            where('status', '==', 'completed')
+        );
+        const snap = await getDocs(q);
+        starterTopupUsed = snap.docs.some((doc) => isStarterTopupRecord(doc.data()));
+    } catch (e) {
+        console.warn('[Pricing] starter eligibility check failed:', e);
+    }
+}
+
+function getVisibleCoinPackages() {
+    return COIN_PACKAGES.filter((pkg) => {
+        if (pkg.oneTime && pkg.id === 'starter_v2' && starterTopupUsed) return false;
+        return true;
+    });
+}
 let referralEarningsUnsubscribe = null; // Cleanup handle for referralEarnings onSnapshot (legacy - giờ dùng FB_LISTENERS)
 let referralCurrentCode = null; // User's referral code, populated when opening referral page
 const SUPER_ADMIN_EMAILS = ["traderfinn0312@gmail.com", "dinhhoangvan.hh@gmail.com"]; // Danh sách admin khởi tạo
@@ -1313,6 +1347,7 @@ async function handleUserLoggedIn(user) {
                     num_items: 1
                 });
 
+                refreshStarterTopupEligibility().then(() => renderPricing());
             }
 
             document.querySelectorAll('.coin-balance-text').forEach(el => el.innerText = currentCoins);
@@ -1371,6 +1406,9 @@ async function handleUserLoggedIn(user) {
     }));
 
 
+
+    await refreshStarterTopupEligibility();
+    renderPricing();
 
     loadMyOrders();
     loadMyTopups();
@@ -1598,7 +1636,7 @@ window.copyAdminResultLink = () => {
 function renderPricing() {
     const coinGrid = document.getElementById('coin-packages');
     const modalCoinGrid = document.getElementById('modal-coin-packages');
-    const filteredPackages = COIN_PACKAGES;
+    const filteredPackages = getVisibleCoinPackages();
 
     const vietqrPayIcon = `<svg class="pricing-pay-icon pricing-pay-icon--vietqr" viewBox="0 0 24 24" aria-hidden="true"><rect width="24" height="24" rx="3" fill="#DA251D"/><path fill="#FFCD00" d="M12 5.4l1.55 3.14 3.46.5-2.5 2.44.59 3.45L12 14.7l-3.1 1.63.59-3.45-2.5-2.44 3.46-.5L12 5.4z"/></svg>`;
     const coinIcon = `<svg class="coin-icon-svg" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 2L20.66 7V17L12 22L3.34 17V7L12 2Z" fill="url(#coin-gradient)" fill-opacity="0.2" stroke="url(#coin-gradient)" stroke-width="2"/><path d="M12 6L17.2 9V15L12 18L6.8 15V9L12 6Z" fill="url(#coin-gradient)"/><path d="M12 9V15M9 12H15" stroke="white" stroke-width="1.5" stroke-linecap="round"/></svg>`;
@@ -1851,8 +1889,10 @@ window.openTopupModal = () => {
     window.openPricingModal();
 };
 
-window.openPricingModal = () => {
+window.openPricingModal = async () => {
     if (!currentUser) return;
+    await refreshStarterTopupEligibility();
+    renderPricing();
     window.openModal('pricing-modal');
     
     // TikTok Pixel: ViewContent (Viewing Topup Packages)
@@ -1877,7 +1917,13 @@ window.openPricingModal = () => {
 window.selectTopup = async (id) => {
     if (!currentUser) return;
 
+    await refreshStarterTopupEligibility();
     selectedTopupPackage = COIN_PACKAGES.find(p => p.id === id);
+    if (!selectedTopupPackage) return;
+    if (selectedTopupPackage.oneTime && starterTopupUsed) {
+        renderPricing();
+        return showToast(t('pricing.starter_already_used'));
+    }
 
     initialCoinsBeforeTopup = parseInt((document.getElementById('coin-balance') || document.querySelector('.coin-balance-text'))?.innerText) || 0;
 
@@ -1939,6 +1985,7 @@ window.selectTopup = async (id) => {
                 userId: currentUser.uid,
                 userEmail: currentUser.email,
                 userName: currentUser.displayName,
+                packageId: selectedTopupPackage.id,
                 packageName: selectedTopupPackage.name,
                 coins: selectedTopupPackage.coins,
                 amount: selectedTopupPackage.amount,
