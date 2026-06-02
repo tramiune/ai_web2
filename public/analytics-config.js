@@ -3,6 +3,6 @@
  * Meta: business.facebook.com → Events Manager → Data sources → your Pixel ID (numeric).
  */
 window.ANALYTICS_CONFIG = {
-    tiktokPixelId: 'D7VMB2RC77UDOFSGG2BG',
+    tiktokPixelId: 'D8FDCERC77UDLID658L0',
     metaPixelId: '974630798606796'
 };
