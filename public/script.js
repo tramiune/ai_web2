@@ -3778,6 +3778,117 @@ window.deleteUserAdmin = async (userId) => {
     }
 };
 
+const PURGE_INACTIVE_USER_DAYS = 3;
+const TOPUP_SUCCESS_STATUSES = ['approved', 'completed'];
+
+function isProtectedAdminUser(userData) {
+    if (!userData) return true;
+    const role = userData.role || 'user';
+    if (role === 'admin' || role === 'super-admin') return true;
+    const email = (userData.email || '').toLowerCase();
+    if (email && SUPER_ADMIN_EMAILS.includes(email)) return true;
+    return false;
+}
+
+async function collectToppedUpUserIds() {
+    const { db, collection, query, where, getDocs } = window.firebase;
+    const toppedUp = new Set();
+    for (const status of TOPUP_SUCCESS_STATUSES) {
+        const snap = await getDocs(query(collection(db, 'topups'), where('status', '==', status)));
+        snap.docs.forEach((docSnap) => {
+            const uid = docSnap.data()?.userId;
+            if (uid) toppedUp.add(uid);
+        });
+    }
+    return toppedUp;
+}
+
+async function fetchAllUsersForPurge() {
+    if (FB_CACHE.adminUsersFull?.length) return FB_CACHE.adminUsersFull;
+    const { db, collection, getDocs } = window.firebase;
+    const snap = await getDocs(collection(db, 'users'));
+    const users = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    FB_CACHE.adminUsersFull = users;
+    FB_CACHE.adminUsersTruncated = false;
+    return users;
+}
+
+function listUsersEligibleForInactivePurge(allUsers, toppedUpUserIds) {
+    const cutoffMs = Date.now() - PURGE_INACTIVE_USER_DAYS * 24 * 60 * 60 * 1000;
+    const eligible = [];
+    for (const u of allUsers) {
+        if (isProtectedAdminUser(u)) continue;
+        if (toppedUpUserIds.has(u.id)) continue;
+        const createdMs = safeToDate(u.createdAt)?.getTime();
+        if (!createdMs || createdMs > cutoffMs) continue;
+        eligible.push(u);
+    }
+    return eligible;
+}
+
+window.purgeInactiveUsersAdmin = async () => {
+    if (!window.__isSuperAdmin) {
+        return showToast(t('admin.purge_inactive_users_denied'));
+    }
+    const btn = document.getElementById('purge-inactive-users-btn');
+    if (btn) btn.disabled = true;
+
+    try {
+        showToast(t('admin.purge_inactive_users_scanning'));
+        const [allUsers, toppedUpUserIds] = await Promise.all([
+            fetchAllUsersForPurge(),
+            collectToppedUpUserIds()
+        ]);
+        const toDelete = listUsersEligibleForInactivePurge(allUsers, toppedUpUserIds);
+
+        if (toDelete.length === 0) {
+            showToast(t('admin.purge_inactive_users_none'));
+            return;
+        }
+
+        const preview = toDelete.slice(0, 5).map((u) => {
+            const label = u.displayName || u.email || u.id.slice(0, 8);
+            return `• ${label}`;
+        }).join('\n');
+        const more = toDelete.length > 5 ? `\n… +${toDelete.length - 5}` : '';
+
+        window.niceConfirm({
+            title: t('admin.purge_inactive_users_confirm_title'),
+            message: t('admin.purge_inactive_users_confirm_msg', { count: toDelete.length, preview: preview + more }),
+            icon: '🗑️',
+            onConfirm: async () => {
+                const { db, doc, deleteDoc } = window.firebase;
+                let deleted = 0;
+                let failed = 0;
+                for (const u of toDelete) {
+                    try {
+                        await deleteDoc(doc(db, 'users', u.id));
+                        deleted++;
+                    } catch (e) {
+                        failed++;
+                        console.warn('[Purge] delete failed:', u.id, e);
+                    }
+                }
+                FB_CACHE.adminUsers = (FB_CACHE.adminUsers || []).filter((x) => !toDelete.some((d) => d.id === x.id));
+                if (FB_CACHE.adminUsersFull) {
+                    FB_CACHE.adminUsersFull = FB_CACHE.adminUsersFull.filter((x) => !toDelete.some((d) => d.id === x.id));
+                }
+                renderAdminUsers();
+                if (failed > 0) {
+                    showToast(t('admin.purge_inactive_users_partial', { deleted, failed }));
+                } else {
+                    showToast(t('admin.purge_inactive_users_done', { count: deleted }));
+                }
+            }
+        });
+    } catch (e) {
+        console.error('[Purge] scan failed:', e);
+        showToast(t('common.error_with_msg', { msg: e.message }));
+    } finally {
+        if (btn) btn.disabled = false;
+    }
+};
+
 window.approveTopup = async (topupId, userId, coins) => {
     if (!confirm(t('admin.confirm_approve_topup', { coins }))) return;
 

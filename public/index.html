@@ -748,8 +748,14 @@
         <!-- Tab: Users -->
         <div id="admin-tab-users" class="admin-tab-content">
             <div class="admin-section" style="margin-bottom: 3rem;">
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem; flex-wrap: wrap; gap: 0.75rem;">
                     <h2 style="margin: 0;" data-i18n="admin.users_list_title">Danh sách Thành viên</h2>
+                    <button type="button" id="purge-inactive-users-btn" class="btn-secondary"
+                        style="font-size: 0.8rem; color: #ff1744; border-color: rgba(255, 23, 68, 0.35); white-space: nowrap;"
+                        onclick="window.purgeInactiveUsersAdmin()"
+                        data-i18n="admin.purge_inactive_users_btn">
+                        Xóa nick &gt;3 ngày chưa nạp
+                    </button>
                 </div>
                 <div style="overflow-x: auto;">
                     <table class="data-table">
@@ -1157,7 +1163,7 @@
             <div id="confirm-icon" style="font-size: 3.5rem; margin-bottom: 1.5rem;">⏳</div>
             <h3 id="confirm-title" style="font-size: 1.5rem; margin-bottom: 1rem;"
                 data-i18n="modals.confirm_order_title">Xác nhận</h3>
-            <p id="confirm-msg" style="color: var(--text-muted); margin-bottom: 2rem; line-height: 1.6;"></p>
+            <p id="confirm-msg" style="color: var(--text-muted); margin-bottom: 2rem; line-height: 1.6; white-space: pre-line;"></p>
             <div style="display: flex; gap: 1rem;">
                 <button class="btn-secondary" style="flex: 1;" onclick="closeModal('confirm-modal')"
                     data-i18n="modals.back">Quay lại</button>
