@@ -52,6 +52,32 @@ _processing_cache_lock = threading.Lock()
 HEARTBEAT_SEC = int(os.environ.get("BOT_HEARTBEAT_SEC", "60"))
 
 
+def _pop_processing_cache(order_id):
+    with _processing_cache_lock:
+        _processing_cache.pop(order_id, None)
+
+
+def _order_already_completed(order_id):
+    """Re-fetch Firestore — tránh hoàn đơn / spam Telegram lặp."""
+    try:
+        snap = db.collection('orders').document(order_id).get()
+        if not snap.exists:
+            return True
+        d = snap.to_dict() or {}
+        return d.get('status') == 'completed' or bool(d.get('resultLink'))
+    except Exception as e:
+        print(f"⚠️ Không đọc được đơn {order_id}: {e}")
+        return False
+
+
+def _skip_if_order_done(order_id, reason):
+    if _order_already_completed(order_id):
+        print(f"⏭️ Bỏ qua đơn {order_id} — {reason}")
+        _pop_processing_cache(order_id)
+        return True
+    return False
+
+
 _http_client = None
 _http_client_lock = threading.Lock()
 
@@ -133,6 +159,8 @@ def _http_poll_orders(orders_to_check):
         status = (job.get('status') or '').upper()
         print(f"   status={status}, outputFileId={job.get('outputFileId')}")
         if status == 'COMPLETED' and job.get('outputFileId'):
+            if _skip_if_order_done(doc.id, "đã completed trên Firestore"):
+                continue
             print(f"🎉 Job {job_id} HOÀN TẤT — tải file {job['outputFileId']}...")
             try:
                 local_vid = api.download_file(job['outputFileId'], f"res_{doc.id}.mp4")
@@ -157,6 +185,7 @@ def _http_poll_orders(orders_to_check):
                 'systemNote': 'Đơn hàng xử lý không thành công, hệ thống đã hoàn lại coin.',
                 'updatedAt': firestore.SERVER_TIMESTAMP
             })
+            _pop_processing_cache(doc.id)
         else:
             print(f"⏳ Job {job_id} vẫn {status}")
 
@@ -166,9 +195,18 @@ def _processing_monitor_state():
     now = datetime.now(timezone.utc)
     eligible = []
     with _processing_cache_lock:
+        stale_ids = []
+        for oid, doc in _processing_cache.items():
+            d = doc.to_dict() or {}
+            if d.get('status') != 'processing':
+                stale_ids.append(oid)
+        for oid in stale_ids:
+            _processing_cache.pop(oid, None)
         processing_count = len(_processing_cache)
         for doc in _processing_cache.values():
             d = doc.to_dict() or {}
+            if d.get('status') != 'processing':
+                continue
             job_id = d.get('aidancingJobId')
             submitted_at = d.get('submittedAt')
             if not job_id or job_id == "MANUAL":
@@ -830,6 +868,13 @@ def use_api_mode():
 
 def _complete_order_with_video(doc, local_vid):
     """Upload R2 + cập nhật Firestore + thông báo."""
+    order_id = doc.id
+    if _order_already_completed(order_id):
+        print(f"⏭️ Đơn {order_id} đã completed — không gửi lại Telegram/R2")
+        _pop_processing_cache(order_id)
+        if os.path.exists(local_vid):
+            os.remove(local_vid)
+        return True
     r2_url = upload_to_r2(local_vid)
     if not r2_url:
         return False
@@ -863,6 +908,7 @@ def _complete_order_with_video(doc, local_vid):
         print(f"⚠️ Không gửi được email thông báo: {mail_err}")
     if os.path.exists(local_vid):
         os.remove(local_vid)
+    _pop_processing_cache(order_id)
     return True
 
 def check_finished_orders_api():
