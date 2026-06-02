@@ -209,6 +209,7 @@ function resolvePromoCost(orders, baseCost) {
 }
 let initialCoinsBeforeTopup = 0; // Để theo dõi số dư trước khi nạp
 let starterTopupUsed = false; // Đã nạp gói starter_v2 (10k) — ẩn gói sau lần đầu
+let initialAuthSettled = false;
 
 function isStarterTopupRecord(data) {
     if (!data) return false;
@@ -578,10 +579,16 @@ export async function initAppLogic() {
 
     const { auth, onAuthStateChanged, signInAnonymously } = window.firebase;
 
+    showAuthLoading();
+
     onAuthStateChanged(auth, async (user) => {
         try {
             if (user) {
                 currentUser = user;
+                hideAuthLoading();
+                if (isInAppBrowser()) {
+                    showInAppBrowserBanner();
+                }
                 await handleUserLoggedIn(user);
                 return;
             }
@@ -590,10 +597,12 @@ export async function initAppLogic() {
                 await signInAnonymously(auth);
             } catch (e) {
                 console.error('[Auth] Anonymous sign-in failed:', e);
+                hideAuthLoading();
                 showToast(t('common.error_auth', { msg: e?.message || 'anonymous' }));
             }
         } catch (e) {
             console.error("Auth Change Error:", e);
+            hideAuthLoading();
             showToast(t('common.error_auth', { msg: e.message }));
         }
     });
@@ -688,19 +697,35 @@ function isStandaloneBrowser() {
     return (isChrome || isSafari) && !isInAppBrowser();
 }
 
+function showAuthLoading() {
+    if (initialAuthSettled) return;
+    const overlay = document.getElementById('auth-loading-overlay');
+    if (!overlay) return;
+    overlay.hidden = false;
+    document.body.classList.add('auth-loading-active');
+}
+
+function hideAuthLoading() {
+    if (initialAuthSettled) return;
+    initialAuthSettled = true;
+    const overlay = document.getElementById('auth-loading-overlay');
+    if (overlay) overlay.hidden = true;
+    document.body.classList.remove('auth-loading-active');
+}
+
 function showInAppBrowserBanner() {
     if (!isInAppBrowser() || sessionStorage.getItem('inapp-banner-dismissed') === '1') return;
-    const banner = document.getElementById('inapp-browser-banner');
-    if (!banner) return;
-    banner.hidden = false;
-    document.body.classList.add('has-inapp-banner');
+    const modal = document.getElementById('inapp-browser-modal');
+    if (!modal) return;
+    modal.hidden = false;
+    document.body.classList.add('inapp-modal-open');
     applyTranslations();
 }
 
 window.dismissInAppBrowserBanner = () => {
-    const banner = document.getElementById('inapp-browser-banner');
-    if (banner) banner.hidden = true;
-    document.body.classList.remove('has-inapp-banner');
+    const modal = document.getElementById('inapp-browser-modal');
+    if (modal) modal.hidden = true;
+    document.body.classList.remove('inapp-modal-open');
     sessionStorage.setItem('inapp-banner-dismissed', '1');
 };
 
@@ -797,10 +822,6 @@ window.openExternalBrowser = async (targetUrl) => {
 function detectInAppBrowser() {
     const isInApp = isInAppBrowser();
     const isSupported = isStandaloneBrowser();
-
-    if (isInApp) {
-        showInAppBrowserBanner();
-    }
 
     if (!isSupported) {
         const googleBtn = document.getElementById('google-login-btn');
