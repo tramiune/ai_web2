@@ -637,7 +637,7 @@ function getMessengerSupportUrl() {
 }
 
 function setupAdminTelegramUnlock() {
-    const fab = document.getElementById('telegram-fab');
+    const fab = document.getElementById('messenger-fab');
     if (!fab) return;
 
     const supportUrl = getMessengerSupportUrl();
