@@ -2707,7 +2707,6 @@ window.changeAdminUserPage = (newPage) => {
 };
 
 // ----- BOTS (Admin tab) -----
-const BOT_ONLINE_MS = 90 * 1000;
 let _renderAdminBotsTimer = null;
 
 function scheduleRenderAdminBots() {
@@ -2741,26 +2740,22 @@ function renderAdminBots() {
     if (!list) return;
 
     const rows = (FB_CACHE.adminBots || []).slice().sort((a, b) => {
-        const ta = safeToDate(a.lastSeenAt)?.getTime() || 0;
-        const tb = safeToDate(b.lastSeenAt)?.getTime() || 0;
+        const ta = safeToDate(a.startedAt)?.getTime() || safeToDate(a.createdAt)?.getTime() || 0;
+        const tb = safeToDate(b.startedAt)?.getTime() || safeToDate(b.createdAt)?.getTime() || 0;
         return tb - ta;
     });
 
     if (rows.length === 0) {
-        list.innerHTML = `<tr><td colspan="6" style="text-align:center; opacity:0.5; padding:2rem;">${t('admin.bots_empty')}</td></tr>`;
+        list.innerHTML = `<tr><td colspan="5" style="text-align:center; opacity:0.5; padding:2rem;">${t('admin.bots_empty')}</td></tr>`;
         return;
     }
 
     list.innerHTML = rows.map(b => {
-        const lastSeen = safeToDate(b.lastSeenAt);
-        const online = lastSeen && (Date.now() - lastSeen.getTime() < BOT_ONLINE_MS);
-        const lastStr = lastSeen
-            ? lastSeen.toLocaleString(currentLang === 'en' ? 'en-US' : 'vi-VN')
+        const started = safeToDate(b.startedAt) || safeToDate(b.createdAt);
+        const startedStr = started
+            ? started.toLocaleString(currentLang === 'en' ? 'en-US' : 'vi-VN')
             : '—';
         const enabled = !!b.enabled;
-        const statusHtml = online
-            ? `<span style="color:#27ae60; font-weight:600;">● ${t('admin.bots_online')}</span>`
-            : `<span style="opacity:0.5;">○ ${t('admin.bots_offline')}</span>`;
         const runLabel = enabled ? t('admin.bots_running') : t('admin.bots_stopped');
         const runColor = enabled ? '#27ae60' : '#c0392b';
 
@@ -2770,7 +2765,6 @@ function renderAdminBots() {
                     <div style="font-weight:700; font-family: monospace;">${escapeHTML(b.displayName || b.name || b.id)}</div>
                     <small style="opacity:0.55;">ID: ${escapeHTML(b.id)}</small>
                 </td>
-                <td>${statusHtml}</td>
                 <td>
                     <div style="display:flex; align-items:center; gap:0.75rem; flex-wrap:wrap;">
                         <span style="color:${runColor}; font-weight:600; font-size:0.85rem;">${runLabel}</span>
@@ -2780,7 +2774,7 @@ function renderAdminBots() {
                         </button>
                     </div>
                 </td>
-                <td>${lastStr}</td>
+                <td>${startedStr}</td>
                 <td><small style="opacity:0.7;">${escapeHTML(b.hostname || '—')}</small></td>
                 <td>
                     <button type="button" class="btn-delete" style="padding: 6px 10px; background: rgba(255,59,48,0.1); border: 1px solid rgba(255,59,48,0.2); border-radius: 6px; cursor: pointer; color: #ff3b30; font-size: 0.75rem;"
