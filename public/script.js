@@ -627,27 +627,13 @@ export async function initAppLogic() {
     applyTranslations();
 }
 
-const MESSENGER_PAGE_USERNAME = 'nhay.cloud';
-const MESSENGER_MME_URL = `https://m.me/${MESSENGER_PAGE_USERNAME}?ref=website`;
-const FACEBOOK_PAGE_URL = `https://www.facebook.com/${MESSENGER_PAGE_USERNAME}`;
-
-function getMessengerSupportUrl() {
-    // In-app browsers (TikTok, IG, …) often open Messenger home with m.me — Page URL is more reliable.
-    return isInAppBrowser() ? FACEBOOK_PAGE_URL : MESSENGER_MME_URL;
-}
+const TELEGRAM_SUPPORT_URL = 'https://t.me/motionaistudio';
 
 function setupAdminTelegramUnlock() {
-    const fab = document.getElementById('messenger-fab');
+    const fab = document.getElementById('telegram-fab');
     if (!fab) return;
 
-    const supportUrl = getMessengerSupportUrl();
-    fab.href = supportUrl;
-    if (isInAppBrowser()) {
-        fab.removeAttribute('target');
-    } else {
-        fab.setAttribute('target', '_blank');
-        fab.setAttribute('rel', 'noopener noreferrer');
-    }
+    fab.href = TELEGRAM_SUPPORT_URL;
 
     let holdTimer = null;
     let suppressClick = false;
@@ -686,7 +672,6 @@ function setupAdminTelegramUnlock() {
             suppressClick = false;
             return;
         }
-        // Short tap: native <a href="m.me/..."> — opens chat with Page on mobile (window.open often fails).
     });
 }
 
