@@ -277,7 +277,7 @@ window.TRANSLATIONS = {
             delay_note: "💬 Đơn hàng đang được điều phối xử lý, bạn vui lòng đợi thêm chút nhé!",
             download_btn: "📥 Tải về",
             orders_count: "{count} Videos",
-            first_order_cta_vnd: "Thử ngay 1000đ"
+            first_order_cta_vnd: "Thử ngay chỉ 1000đ"
         },
         modals: {
             topup_title: "Nạp Coin tự động",

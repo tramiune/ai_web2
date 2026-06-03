@@ -3571,6 +3571,8 @@ section {
   transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
   border: 2px solid rgba(255, 255, 255, 0.2);
   cursor: pointer;
+  color: inherit;
+  text-decoration: none;
   -webkit-touch-callout: none;
   -webkit-user-select: none;
   user-select: none;
