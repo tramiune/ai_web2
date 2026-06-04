@@ -3052,6 +3052,17 @@ function loadMyOrders() {
     }));
 }
 
+/** Ghi chú đơn hiển thị cho khách — không lộ engine render (Aidancing/XiaoYang). */
+function userFacingOrderNote(order) {
+    const raw = (order && order.systemNote) || '';
+    if (!raw) return '';
+    return raw
+        .replace(/\bXiaoYang\b/gi, 'hệ thống')
+        .replace(/\bAidancing\b/gi, 'hệ thống')
+        .replace(/\baidancing\.net\b/gi, 'hệ thống')
+        .replace(/\bxiaoyang\.online\b/gi, 'hệ thống');
+}
+
 function renderMyOrders() {
     const grid = document.getElementById('my-orders-grid');
     const countText = document.getElementById('orders-count-text');
@@ -3111,7 +3122,7 @@ function renderMyOrders() {
                         </div>
                         <div class="order-type-text">${d.serviceLabel || ''}</div>
                         ${delayNote}
-                        ${(d.systemNote || d.adminNote) ? `<div class="order-system-note">💬 ${d.systemNote || d.adminNote}</div>` : ''}
+                        ${userFacingOrderNote(d) ? `<div class="order-system-note">💬 ${escapeHTML(userFacingOrderNote(d))}</div>` : ''}
                         <div class="order-footer">
                             <div class="order-cost-tag">
                                 <svg style="width: 12px; height: 12px;" viewBox="0 0 24 24" fill="none">
@@ -4784,11 +4795,11 @@ window.openUserOrderDetail = async (orderId) => {
                 </div>
                 `;
         })()}
-            ${d.adminNote ? `
+            ${userFacingOrderNote(d) ? `
             <div class="info-item" style="grid-column: span 2;">
                 <span class="info-label">${t('modals.order_system_note')}</span>
                 <div class="glass-card" style="padding: 1rem; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.02); border-radius: 8px; color: var(--text-dim); line-height: 1.5;">
-                    ${d.adminNote}
+                    ${escapeHTML(userFacingOrderNote(d))}
                 </div>
             </div>
             ` : ''}

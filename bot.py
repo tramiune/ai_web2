@@ -57,6 +57,12 @@ _submitting_orders_lock = threading.Lock()
 MIN_RENDER_SEC = int(os.environ.get("BOT_MIN_RENDER_SEC", "600"))
 RENDER_PROVIDER_AIDANCING = "aidancing"
 RENDER_PROVIDER_XIAOYANG = "xiaoyang"
+
+# Thông báo hiển thị cho khách — không nhắc Aidancing / XiaoYang
+USER_NOTE_ORDER_FAILED = "Đơn hàng xử lý không thành công, hệ thống đã hoàn lại coin."
+USER_NOTE_SUBMIT_FAILED = "Không thể gửi đơn lên hệ thống xử lý, đã hoàn lại coin."
+USER_NOTE_FILES_MISSING = "Ảnh hoặc video quý khách tải lên không tồn tại, hệ thống đã hoàn lại coin."
+USER_NOTE_FILES_INVALID = "Ảnh hoặc video quý khách tải lên không hợp lệ, hệ thống đã hoàn lại coin."
 _active_render_provider = RENDER_PROVIDER_XIAOYANG
 _active_render_provider_lock = threading.Lock()
 _processing_cache = {}
@@ -269,7 +275,7 @@ def _http_poll_orders(orders_to_check):
             db.collection('orders').document(doc.id).update({
                 'status': 'failed',
                 'adminNote': firestore.DELETE_FIELD,
-                'systemNote': 'Đơn hàng xử lý không thành công, hệ thống đã hoàn lại coin.',
+                'systemNote': USER_NOTE_ORDER_FAILED,
                 'updatedAt': firestore.SERVER_TIMESTAMP
             })
             _pop_processing_cache(doc.id)
@@ -329,7 +335,7 @@ def _http_poll_xiaoyang_orders(orders_to_check):
                 doc,
                 order_data,
                 f"XiaoYang task {task_id} FAIL: {err or ''}",
-                "Đơn hàng xử lý không thành công (XiaoYang), hệ thống đã hoàn lại coin.",
+                USER_NOTE_ORDER_FAILED,
                 "render xiaoyang",
             )
             api.try_delete_task(task_id)
@@ -706,6 +712,19 @@ def start_bot_control_listener():
 
     db.collection('bots').document(BOT_NAME).on_snapshot(on_bot_config_snapshot)
 
+def _telegram_order_processing_notice(order_id, ref_id=None):
+    """Telegram admin — không ghi tên engine render."""
+    short_id = order_id[-6:].upper()
+    msg = (
+        f"⚙️ <b>ĐƠN HÀNG ĐANG XỬ LÝ</b>\n\n"
+        f"🆔 Mã đơn: #{short_id}\n"
+    )
+    if ref_id:
+        msg += f"🔖 Mã xử lý: <code>{ref_id}</code>\n"
+    msg += f"⏳ Dự kiến ~{MIN_RENDER_SEC // 60} phút."
+    send_telegram_message(msg)
+
+
 def send_telegram_message(text):
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
@@ -721,11 +740,12 @@ def send_telegram_message(text):
         print(f"❌ Lỗi kết nối gửi Telegram: {e}")
 
 _INTERNAL_ERROR_MARKERS = (
-    'aidancing', '/api/proxy/', 'proxy/jobs', 'proxy/files',
-    '401', '503', '502', '429', 'đăng nhập lại', 'bảo trì',
+    'aidancing', 'xiaoyang', 'xiao yang', '/api/proxy/', 'proxy/jobs', 'proxy/files',
+    '401', '503', '502', '429', '400', '504', 'đăng nhập lại', 'bảo trì',
     'chrome cdp', 'connect_over_cdp', 'econnrefused', 'target closed',
-    'different thread', 'job id aidancing', 'dashboard', 'create/general',
-    'bot nạp', 'maintenance',
+    'different thread', 'job id', 'dashboard', 'create/general',
+    'bot nạp', 'maintenance', 'option_key', 'modal_key', 'direct_media',
+    'workers', 'e_direct_media', 'session expired', 'cookie',
 )
 _ERROR_TELEGRAM_COOLDOWN = 900
 _error_telegram_sent = {}
@@ -759,16 +779,10 @@ def notify_internal_error_telegram(order_id, order_data, err, context=''):
     send_telegram_message(msg)
 
 def apply_bot_error_update(doc_ref, order_id, order_data, err, context='nạp đơn'):
-    """Lỗi Aidancing/hạ tầng bot → Telegram admin, không hiện adminNote cho khách."""
-    if is_internal_bot_error(err):
-        notify_internal_error_telegram(order_id, order_data, err, context)
-        _session_error_backoff[order_id] = time.time() + SESSION_ERROR_BACKOFF_SEC
-        return True
-    doc_ref.update({
-        'adminNote': f"Bot nạp lỗi: {err}",
-        'updatedAt': firestore.SERVER_TIMESTAMP,
-    })
-    return False
+    """Lỗi hạ tầng → Telegram admin; không ghi chi tiết kỹ thuật ra đơn cho khách đọc."""
+    notify_internal_error_telegram(order_id, order_data, err, context)
+    _session_error_backoff[order_id] = time.time() + SESSION_ERROR_BACKOFF_SEC
+    return True
 
 def _pending_submit_backoff_active(order_id):
     return time.time() < _session_error_backoff.get(order_id, 0)
@@ -1163,13 +1177,7 @@ def submit_to_xiaoyang(order_id):
                 _session_error_backoff.pop(order_id, None)
                 print(f"✅ Đơn {order_id} → processing (XiaoYang)")
                 try:
-                    short_id = order_id[-6:].upper()
-                    send_telegram_message(
-                        f"⚙️ <b>ĐƠN HÀNG ĐANG XỬ LÝ</b> (XiaoYang)\n\n"
-                        f"🆔 Mã đơn: #{short_id}\n"
-                        f"🤖 Task: <code>{task_id}</code>\n"
-                        f"⏳ Poll sau {MIN_RENDER_SEC // 60} phút..."
-                    )
+                    _telegram_order_processing_notice(order_id, task_id)
                 except Exception:
                     pass
             except (XiaoyangAuthError, XiaoyangApiError, DirectMediaError, MediaValidationError, ValueError) as e:
@@ -1181,7 +1189,7 @@ def submit_to_xiaoyang(order_id):
                     doc,
                     data,
                     str(e),
-                    "Không thể gửi đơn lên XiaoYang, hệ thống đã hoàn lại coin.",
+                    USER_NOTE_SUBMIT_FAILED,
                     "submit xiaoyang",
                 )
     finally:
@@ -1241,7 +1249,8 @@ def submit_to_aidancing(order_id):
 
                 doc_ref.update({
                     'status': 'failed',
-                    'adminNote': 'Ảnh hoặc video quý khách tải lên không tồn tại, hệ thống đã hoàn lại coin.',
+                    'adminNote': firestore.DELETE_FIELD,
+                    'systemNote': USER_NOTE_FILES_MISSING,
                     'updatedAt': firestore.SERVER_TIMESTAMP
                 })
 
@@ -1274,14 +1283,7 @@ def submit_to_aidancing(order_id):
                     _session_error_backoff.pop(order_id, None)
                     print(f"✅ Đơn {order_id} → processing (aidancing đã nhận job)")
                     try:
-                        short_id = order_id[-6:].upper()
-                        msg = (
-                            f"⚙️ <b>ĐƠN HÀNG ĐANG XỬ LÝ</b>\n\n"
-                            f"🆔 Mã đơn: #{short_id}\n"
-                            f"🤖 Job ID aidancing: <code>{job_id}</code>\n"
-                            f"⏳ Đang render (HTTP mode)..."
-                        )
-                        send_telegram_message(msg)
+                        _telegram_order_processing_notice(order_id, job_id)
                     except Exception:
                         pass
                 except SessionExpiredError as e:
@@ -1358,15 +1360,7 @@ def submit_to_aidancing(order_id):
                         short_id = order_id[-6:].upper()
                         user_name = data.get('userName', 'Khách hàng')
                         user_email = data.get('userEmail', 'N/A')
-                        msg = (
-                            f"⚙️ <b>ĐƠN HÀNG ĐANG XỬ LÝ</b>\n\n"
-                            f"🆔 Mã đơn: #{short_id}\n"
-                            f"👤 Khách: {user_name}\n"
-                            f"📧 Email: {user_email}\n"
-                            f"🤖 Job ID aidancing: <code>{job_id}</code>\n"
-                            f"⏳ Đang render trên aidancing.net..."
-                        )
-                        send_telegram_message(msg)
+                        _telegram_order_processing_notice(order_id, job_id)
                     except Exception as tele_err:
                         print(f"⚠️ Lỗi gửi thông báo Telegram xử lý: {tele_err}")
                 else:
@@ -1557,7 +1551,8 @@ def check_finished_orders():
 
                             db.collection('orders').document(doc.id).update({
                                 'status': 'failed',
-                                'adminNote': 'Ảnh hoặc video quý khách tải lên không hợp lệ, hệ thống đã hoàn lại coin.',
+                                'adminNote': firestore.DELETE_FIELD,
+                                'systemNote': USER_NOTE_FILES_INVALID,
                                 'updatedAt': firestore.SERVER_TIMESTAMP
                             })
 
