@@ -3553,21 +3553,21 @@ section {
   }
 }
 
-/* Floating Messenger support button */
-.messenger-fab {
+/* Floating Telegram support button */
+.telegram-fab {
   position: fixed;
   bottom: 30px;
   right: 30px;
   width: 60px;
   height: 60px;
   padding: 0;
-  background: linear-gradient(135deg, #00b2ff, #006aff);
+  background: linear-gradient(135deg, #2aabee, #0088cc);
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
   z-index: 9999;
-  box-shadow: 0 10px 25px rgba(0, 106, 255, 0.45);
+  box-shadow: 0 10px 25px rgba(0, 136, 204, 0.45);
   transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
   border: 2px solid rgba(255, 255, 255, 0.2);
   cursor: pointer;
@@ -3579,19 +3579,19 @@ section {
   touch-action: manipulation;
 }
 
-.messenger-fab svg {
+.telegram-fab svg {
   width: 28px;
   height: 28px;
   transition: transform 0.3s ease;
 }
 
-.messenger-fab:hover {
+.telegram-fab:hover {
   transform: scale(1.1) rotate(5deg);
-  box-shadow: 0 15px 35px rgba(0, 106, 255, 0.55);
+  box-shadow: 0 15px 35px rgba(0, 136, 204, 0.55);
   border-color: rgba(255, 255, 255, 0.5);
 }
 
-.messenger-fab:hover svg {
+.telegram-fab:hover svg {
   transform: scale(1.1);
 }
 
@@ -3613,14 +3613,14 @@ section {
   box-shadow: 0 5px 15px rgba(0,0,0,0.3);
 }
 
-.messenger-fab:hover .fab-tooltip {
+.telegram-fab:hover .fab-tooltip {
   opacity: 1;
   visibility: visible;
   transform: translateX(0);
 }
 
 /* Pulse animation */
-.messenger-fab::before {
+.telegram-fab::before {
   content: '';
   position: absolute;
   width: 100%;
@@ -3638,7 +3638,7 @@ section {
 }
 
 @media (max-width: 768px) {
-  .messenger-fab {
+  .telegram-fab {
     bottom: 20px;
     right: 20px;
     width: 50px;
