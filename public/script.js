@@ -633,55 +633,73 @@ export async function initAppLogic() {
     // Detect In-App Browsers
     detectInAppBrowser();
 
+    setupLogoAdminUnlock();
+    setupTelegramFab();
+
     // Call again after dynamic parts are rendered
     applyTranslations();
 }
 
 const TELEGRAM_SUPPORT_URL = 'https://t.me/motionaistudio';
+const LOGO_ADMIN_TAPS_REQUIRED = 5;
+const LOGO_ADMIN_TAP_WINDOW_MS = 2500;
+const LOGO_SINGLE_NAV_DELAY_MS = 450;
 
-function setupAdminTelegramUnlock() {
+function setupTelegramFab() {
     const fab = document.getElementById('telegram-fab');
     if (!fab) return;
-
     fab.href = TELEGRAM_SUPPORT_URL;
+}
 
-    let holdTimer = null;
-    let suppressClick = false;
+function setupLogoAdminUnlock() {
+    const logo = document.getElementById('site-logo');
+    if (!logo || logo.dataset.adminUnlockBound === '1') return;
+    logo.dataset.adminUnlockBound = '1';
 
-    const clearHold = () => {
-        if (holdTimer) {
-            clearTimeout(holdTimer);
-            holdTimer = null;
+    let tapCount = 0;
+    let resetTimer = null;
+    let singleNavTimer = null;
+
+    const clearTimers = () => {
+        if (resetTimer) {
+            clearTimeout(resetTimer);
+            resetTimer = null;
+        }
+        if (singleNavTimer) {
+            clearTimeout(singleNavTimer);
+            singleNavTimer = null;
         }
     };
 
-    const startHold = () => {
-        clearHold();
-        suppressClick = false;
-        holdTimer = setTimeout(() => {
-            holdTimer = null;
-            suppressClick = true;
+    logo.addEventListener('click', (e) => {
+        e.preventDefault();
+        tapCount++;
+
+        if (singleNavTimer) {
+            clearTimeout(singleNavTimer);
+            singleNavTimer = null;
+        }
+
+        if (resetTimer) clearTimeout(resetTimer);
+        resetTimer = setTimeout(() => {
+            tapCount = 0;
+            resetTimer = null;
+        }, LOGO_ADMIN_TAP_WINDOW_MS);
+
+        if (tapCount >= LOGO_ADMIN_TAPS_REQUIRED) {
+            tapCount = 0;
+            clearTimers();
             showAdminAuthModal();
-        }, ADMIN_TELEGRAM_HOLD_MS);
-    };
-
-    fab.addEventListener('contextmenu', (e) => e.preventDefault());
-
-    fab.addEventListener('pointerdown', (e) => {
-        if (e.pointerType === 'mouse' && e.button !== 0) return;
-        fab.setPointerCapture?.(e.pointerId);
-        startHold();
-    });
-    fab.addEventListener('pointerup', clearHold);
-    fab.addEventListener('pointerleave', clearHold);
-    fab.addEventListener('pointercancel', clearHold);
-
-    fab.addEventListener('click', (e) => {
-        if (suppressClick) {
-            e.preventDefault();
-            suppressClick = false;
             return;
         }
+
+        singleNavTimer = setTimeout(() => {
+            if (tapCount === 1) {
+                window.navTo('user-dashboard');
+            }
+            tapCount = 0;
+            singleNavTimer = null;
+        }, LOGO_SINGLE_NAV_DELAY_MS);
     });
 }
 
