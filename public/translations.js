@@ -14,6 +14,8 @@ window.TRANSLATIONS = {
             id: "Bahasa Indonesia"
         },
         navbar: {
+            guest_display: "Khách #{id}",
+            guest_account: "Tài khoản khách (thiết bị này)",
             dashboard: "Video của tôi",
             logout: "Đăng xuất",
             login: "Đăng nhập",
@@ -694,6 +696,8 @@ window.TRANSLATIONS = {
             id: "Bahasa Indonesia"
         },
         navbar: {
+            guest_display: "Guest #{id}",
+            guest_account: "Guest account (this device)",
             dashboard: "My Videos",
             logout: "Logout",
             login: "Login",

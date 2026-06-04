@@ -1217,7 +1217,12 @@
         import { initAppLogic } from "./script.js";
 
         const app = initializeApp(firebaseConfig);
-        const analytics = getAnalytics(app);
+        let analytics = null;
+        try {
+            analytics = getAnalytics(app);
+        } catch (e) {
+            console.warn('[Analytics] getAnalytics skipped:', e?.message || e);
+        }
         const auth = getAuth(app);
         const db = getFirestore(app);
         const storage = getStorage(app);

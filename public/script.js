@@ -248,6 +248,35 @@ let referralEarningsUnsubscribe = null; // Cleanup handle for referralEarnings o
 let referralCurrentCode = null; // User's referral code, populated when opening referral page
 const SUPER_ADMIN_EMAILS = ["traderfinn0312@gmail.com", "dinhhoangvan.hh@gmail.com"]; // Danh sách admin khởi tạo
 
+function isAnonymousUser(user) {
+    return !!user?.isAnonymous;
+}
+
+function userEmailSafe(user) {
+    return user?.email || '';
+}
+
+function userDisplayLabel(user, profileData) {
+    if (profileData?.displayName) return profileData.displayName;
+    if (user?.displayName) return user.displayName;
+    const email = userEmailSafe(user);
+    if (email) return email.split('@')[0];
+    const shortId = (user?.uid || '').slice(0, 6);
+    return t('navbar.guest_display', { id: shortId || '------' });
+}
+
+function userEmailLabel(user, profileData) {
+    const email = profileData?.email || userEmailSafe(user);
+    if (email) return email;
+    return t('navbar.guest_account');
+}
+
+function updateLogoutMenuItem(user) {
+    const logoutItem = document.getElementById('user-logout-item');
+    if (!logoutItem) return;
+    logoutItem.style.display = isAnonymousUser(user) ? 'none' : 'flex';
+}
+
 // =====================================================================
 // FIREBASE LISTENER REGISTRY (chống leak listener gây tốn reads)
 // =====================================================================
@@ -549,6 +578,12 @@ export async function initAppLogic() {
 
     // (Intro modal removed; login-required uses auth-modal)
 
+    if (!window.firebase?.auth || !window.firebase?.onAuthStateChanged) {
+        console.error('[Auth] Firebase chưa sẵn sàng');
+        hideAuthLoading();
+        return;
+    }
+
     const { auth, onAuthStateChanged, signInAnonymously } = window.firebase;
 
     showAuthLoading();
@@ -565,6 +600,11 @@ export async function initAppLogic() {
                 return;
             }
             currentUser = null;
+            if (typeof signInAnonymously !== 'function') {
+                hideAuthLoading();
+                showToast(t('common.error_auth', { msg: 'signInAnonymously' }));
+                return;
+            }
             try {
                 await signInAnonymously(auth);
             } catch (e) {
@@ -1139,17 +1179,29 @@ async function logout() {
 async function handleUserLoggedIn(user) {
     const { db, doc, getDoc, setDoc, onSnapshot, collection, query, where } = window.firebase;
 
+    const userRefEarly = doc(db, 'users', user.uid);
+    const userSnapEarly = await getDoc(userRefEarly);
+    const profileEarly = userSnapEarly.exists() ? userSnapEarly.data() : null;
+
     // Ẩn Auth Modal bắt buộc
     const authModal = document.getElementById('auth-modal');
     if (authModal) authModal.style.display = 'none';
 
-    // Hiển thị Profile Menu thay vì ghi đè HTML
-    document.getElementById('login-btn').style.display = 'none';
-    document.getElementById('user-profile-menu').style.display = 'block';
+    const loginBtn = document.getElementById('login-btn');
+    const loginSection = document.getElementById('login-section');
+    if (loginBtn) loginBtn.style.display = 'none';
+    if (loginSection) loginSection.style.display = 'none';
+
+    const profileMenu = document.getElementById('user-profile-menu');
+    if (profileMenu) profileMenu.style.display = 'block';
     const navbarCoin = document.getElementById('navbar-coin-widget');
     if (navbarCoin) navbarCoin.style.display = 'flex';
-    document.getElementById('dropdown-user-name').innerText = user.displayName || user.email.split('@')[0];
-    document.getElementById('dropdown-user-email').innerText = user.email;
+
+    const dropdownName = document.getElementById('dropdown-user-name');
+    const dropdownEmail = document.getElementById('dropdown-user-email');
+    if (dropdownName) dropdownName.innerText = userDisplayLabel(user, profileEarly);
+    if (dropdownEmail) dropdownEmail.innerText = userEmailLabel(user, profileEarly);
+    updateLogoutMenuItem(user);
 
     // Avatar for user menu button
     const avatarImg = document.getElementById('user-menu-avatar');
@@ -1195,14 +1247,13 @@ async function handleUserLoggedIn(user) {
         console.log("🎯 Firebase Analytics: User identified");
     }
 
-    const userRef = doc(db, "users", user.uid);
-    const userSnap = await getDoc(userRef);
+    const userRef = userRefEarly;
+    const userSnap = userSnapEarly;
 
-    // Bootstrap Super Admin from hardcoded list to Database
-    const isBootstrapSuperAdmin = SUPER_ADMIN_EMAILS.includes(user.email);
+    const isBootstrapSuperAdmin = !!userEmailSafe(user) && SUPER_ADMIN_EMAILS.includes(user.email);
 
     if (!userSnap.exists()) {
-        const defaultName = user.displayName || user.email.split('@')[0];
+        const defaultName = userDisplayLabel(user);
         const defaultPhoto = user.photoURL || "https://www.gravatar.com/avatar/00000000000000000000000000000000?d=mp&f=y";
 
         // Resolve pending referral code (if any) before creating user doc.
@@ -1231,10 +1282,11 @@ async function handleUserLoggedIn(user) {
         const newUserPayload = {
             uid: user.uid,
             displayName: defaultName,
-            email: user.email,
+            email: userEmailSafe(user),
             photoURL: defaultPhoto,
+            authProvider: isAnonymousUser(user) ? 'anonymous' : (user.providerData?.[0]?.providerId || 'google.com'),
             coins: 0,
-            role: isBootstrapSuperAdmin ? 'super-admin' : 'user', // Tự động gán role vào DB
+            role: isBootstrapSuperAdmin ? 'super-admin' : 'user',
             createdAt: window.firebase.serverTimestamp(),
             updatedAt: window.firebase.serverTimestamp()
         };
@@ -1422,8 +1474,12 @@ function handleUserLoggedOut() {
         v.src = 'https://pub-2b53cd37b4a44642afdbb8bb470bde66.r2.dev/banner.mp4';
     }
 
-    document.getElementById('login-btn').style.display = 'flex';
-    document.getElementById('user-profile-menu').style.display = 'none';
+    const loginBtn = document.getElementById('login-btn');
+    const loginSection = document.getElementById('login-section');
+    if (loginBtn) loginBtn.style.display = 'flex';
+    if (loginSection) loginSection.style.display = '';
+    const profileMenu = document.getElementById('user-profile-menu');
+    if (profileMenu) profileMenu.style.display = 'none';
     const navbarCoin = document.getElementById('navbar-coin-widget');
     if (navbarCoin) navbarCoin.style.display = 'none';
 
