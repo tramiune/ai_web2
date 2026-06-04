@@ -58,6 +58,12 @@ MIN_RENDER_SEC = int(os.environ.get("BOT_MIN_RENDER_SEC", "600"))
 RENDER_PROVIDER_AIDANCING = "aidancing"
 RENDER_PROVIDER_XIAOYANG = "xiaoyang"
 
+# Aidancing modelId trên web (script.js): fast=124/125, turbo=117
+AIDANCING_TURBO_MODEL_IDS = frozenset({"117"})
+AIDANCING_FAST_MODEL_IDS = frozenset({"124", "125"})
+XIAOYANG_MODAL_STANDARD = "motion_v26"
+XIAOYANG_MODAL_TURBO = "motion_v30"
+
 # Thông báo hiển thị cho khách — không nhắc Aidancing / XiaoYang
 USER_NOTE_ORDER_FAILED = "Đơn hàng xử lý không thành công, hệ thống đã hoàn lại coin."
 USER_NOTE_SUBMIT_FAILED = "Không thể gửi đơn lên hệ thống xử lý, đã hoàn lại coin."
@@ -162,6 +168,20 @@ def _reset_http_client():
 def get_active_render_provider():
     with _active_render_provider_lock:
         return _active_render_provider
+
+
+def _xiaoyang_modal_for_order(order_data: dict) -> tuple[str, str]:
+    """Model thường (fast) → motion v2.6; Turbo (modelId 117) → motion v3.0."""
+    model_id = str(order_data.get("modelId") or "").strip()
+    if model_id in AIDANCING_TURBO_MODEL_IDS:
+        return XIAOYANG_MODAL_TURBO, get_env("XIAOYANG_OPTION_KEY", "default")
+    if model_id in AIDANCING_FAST_MODEL_IDS or not model_id:
+        return XIAOYANG_MODAL_STANDARD, get_env("XIAOYANG_OPTION_KEY", "default")
+    # modelId lạ: ưu tiên env, không thì v2.6
+    modal = get_env("XIAOYANG_MODAL_KEY", XIAOYANG_MODAL_STANDARD)
+    if modal not in (XIAOYANG_MODAL_STANDARD, XIAOYANG_MODAL_TURBO):
+        modal = XIAOYANG_MODAL_STANDARD
+    return modal, get_env("XIAOYANG_OPTION_KEY", "default")
 
 
 def _order_render_provider(order_data: dict) -> str:
@@ -1137,8 +1157,7 @@ def submit_to_xiaoyang(order_id):
 
             try:
                 api = _get_xy_http_client()
-                modal = get_env("XIAOYANG_MODAL_KEY", "motion_v30")
-                option = get_env("XIAOYANG_OPTION_KEY", "default")
+                modal, option = _xiaoyang_modal_for_order(data)
                 prompt = (data.get("prompt") or get_env(
                     "XIAOYANG_PROMPT", "Follow the reference motion naturally"
                 )).strip()
@@ -1147,7 +1166,11 @@ def submit_to_xiaoyang(order_id):
                 dw = direct_worker_base()
                 if dw:
                     print(f"📎 Direct worker: {dw}")
-                print(f"🚀 [XiaoYang HTTP] motion {modal}/{option}...")
+                tier = "Turbo/v3.0" if modal == XIAOYANG_MODAL_TURBO else "Thường/v2.6"
+                print(
+                    f"🚀 [XiaoYang HTTP] {tier} — modelId={data.get('modelId')} "
+                    f"→ motion {modal}/{option}..."
+                )
                 resp = api.create_task(
                     modal,
                     option,
