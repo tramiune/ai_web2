@@ -28,7 +28,9 @@ class DirectMediaError(RuntimeError):
 
 
 def direct_worker_base() -> str:
-    return os.environ.get("XIAOYANG_DIRECT_WORKER_URL", "").strip().rstrip("/")
+    from project_env import get_env
+
+    return get_env("XIAOYANG_DIRECT_WORKER_URL").rstrip("/")
 
 
 def is_direct_media_url(url: str) -> bool:
@@ -162,7 +164,9 @@ def resolve_api_v1_media_urls(image_url: str, video_url: str) -> tuple[str, str]
         return image_url, video_url
 
     if is_workers_query_url(image_url) or is_workers_query_url(video_url):
-        if not direct_worker_base() and not os.environ.get("R2_PUBLIC_BASE", "").strip():
+        from project_env import get_env
+
+        if not direct_worker_base() and not get_env("R2_PUBLIC_BASE"):
             raise DirectMediaError(
                 "Link MotionAI Workers (?file=) không dùng trực tiếp với API v1.\n"
                 "Chọn một:\n"

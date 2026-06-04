@@ -13,6 +13,11 @@ from datetime import datetime, timezone
 from firebase_admin import credentials, firestore
 from google.cloud.firestore_v1.base_query import FieldFilter
 from playwright.sync_api import sync_playwright
+
+from project_env import load_project_env
+
+load_project_env()
+
 from aidancing_api import AidancingApiClient, SessionExpiredError
 from xiaoyang_api import XiaoyangApiClient, XiaoyangAuthError, XiaoyangApiError
 from xiaoyang_direct import DirectMediaError
@@ -1136,6 +1141,11 @@ def submit_to_xiaoyang(order_id):
                 prompt = (data.get("prompt") or os.environ.get(
                     "XIAOYANG_PROMPT", "Follow the reference motion naturally"
                 )).strip()
+                from xiaoyang_direct import direct_worker_base
+
+                dw = direct_worker_base()
+                if dw:
+                    print(f"📎 Direct worker: {dw}")
                 print(f"🚀 [XiaoYang HTTP] motion {modal}/{option}...")
                 resp = api.create_task(
                     modal,
@@ -1649,6 +1659,10 @@ def start_bot():
         try:
             me = _get_xy_http_client().me()
             print(f"✅ XiaoYang API — {me.get('email', '?')} | credits: {me.get('credits', '?')}")
+            from xiaoyang_direct import direct_worker_base
+
+            dw = direct_worker_base()
+            print(f"✅ XiaoYang direct worker: {dw or '(chưa cấu hình — Workers ?file= sẽ lỗi)'}")
         except Exception as e:
             print(f"⚠️  XiaoYang API: {e}")
 
