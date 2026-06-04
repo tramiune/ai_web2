@@ -712,19 +712,6 @@ def start_bot_control_listener():
 
     db.collection('bots').document(BOT_NAME).on_snapshot(on_bot_config_snapshot)
 
-def _telegram_order_processing_notice(order_id, ref_id=None):
-    """Telegram admin — không ghi tên engine render."""
-    short_id = order_id[-6:].upper()
-    msg = (
-        f"⚙️ <b>ĐƠN HÀNG ĐANG XỬ LÝ</b>\n\n"
-        f"🆔 Mã đơn: #{short_id}\n"
-    )
-    if ref_id:
-        msg += f"🔖 Mã xử lý: <code>{ref_id}</code>\n"
-    msg += f"⏳ Dự kiến ~{MIN_RENDER_SEC // 60} phút."
-    send_telegram_message(msg)
-
-
 def send_telegram_message(text):
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
@@ -1177,7 +1164,13 @@ def submit_to_xiaoyang(order_id):
                 _session_error_backoff.pop(order_id, None)
                 print(f"✅ Đơn {order_id} → processing (XiaoYang)")
                 try:
-                    _telegram_order_processing_notice(order_id, task_id)
+                    short_id = order_id[-6:].upper()
+                    send_telegram_message(
+                        f"⚙️ <b>ĐƠN HÀNG ĐANG XỬ LÝ</b> (XiaoYang)\n\n"
+                        f"🆔 Mã đơn: #{short_id}\n"
+                        f"🤖 Task: <code>{task_id}</code>\n"
+                        f"⏳ Poll sau {MIN_RENDER_SEC // 60} phút..."
+                    )
                 except Exception:
                     pass
             except (XiaoyangAuthError, XiaoyangApiError, DirectMediaError, MediaValidationError, ValueError) as e:
@@ -1283,7 +1276,13 @@ def submit_to_aidancing(order_id):
                     _session_error_backoff.pop(order_id, None)
                     print(f"✅ Đơn {order_id} → processing (aidancing đã nhận job)")
                     try:
-                        _telegram_order_processing_notice(order_id, job_id)
+                        short_id = order_id[-6:].upper()
+                        send_telegram_message(
+                            f"⚙️ <b>ĐƠN HÀNG ĐANG XỬ LÝ</b>\n\n"
+                            f"🆔 Mã đơn: #{short_id}\n"
+                            f"🤖 Job ID aidancing: <code>{job_id}</code>\n"
+                            f"⏳ Đang render (HTTP mode)..."
+                        )
                     except Exception:
                         pass
                 except SessionExpiredError as e:
@@ -1360,7 +1359,15 @@ def submit_to_aidancing(order_id):
                         short_id = order_id[-6:].upper()
                         user_name = data.get('userName', 'Khách hàng')
                         user_email = data.get('userEmail', 'N/A')
-                        _telegram_order_processing_notice(order_id, job_id)
+                        msg = (
+                            f"⚙️ <b>ĐƠN HÀNG ĐANG XỬ LÝ</b>\n\n"
+                            f"🆔 Mã đơn: #{short_id}\n"
+                            f"👤 Khách: {user_name}\n"
+                            f"📧 Email: {user_email}\n"
+                            f"🤖 Job ID aidancing: <code>{job_id}</code>\n"
+                            f"⏳ Đang render trên aidancing.net..."
+                        )
+                        send_telegram_message(msg)
                     except Exception as tele_err:
                         print(f"⚠️ Lỗi gửi thông báo Telegram xử lý: {tele_err}")
                 else:
