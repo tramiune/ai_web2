@@ -1137,7 +1137,7 @@ def submit_to_xiaoyang(order_id):
 
             try:
                 api = _get_xy_http_client()
-                modal = get_env("XIAOYANG_MODAL_KEY", "motion_v26")
+                modal = get_env("XIAOYANG_MODAL_KEY", "motion_v30")
                 option = get_env("XIAOYANG_OPTION_KEY", "default")
                 prompt = (data.get("prompt") or get_env(
                     "XIAOYANG_PROMPT", "Follow the reference motion naturally"

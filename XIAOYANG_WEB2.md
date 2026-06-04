@@ -14,8 +14,12 @@
 BOT_MODE=api
 XIAOYANG_API_KEY=xy_...
 XIAOYANG_DIRECT_WORKER_URL=https://xiaoyang-direct-media.traderfinn0312.workers.dev
+XIAOYANG_MODAL_KEY=motion_v30
+XIAOYANG_OPTION_KEY=default
 BOT_MIN_RENDER_SEC=300
 ```
+
+`motion_v30` = Motion Control v3.0 (Kling 3.0). `motion_v26` = v2.6 (~72 credits vs ~206 credits/task).
 
 ## Luồng XiaoYang
 
