@@ -14,7 +14,7 @@ from firebase_admin import credentials, firestore
 from google.cloud.firestore_v1.base_query import FieldFilter
 from playwright.sync_api import sync_playwright
 
-from project_env import load_project_env
+from project_env import get_env, load_project_env
 
 load_project_env()
 
@@ -1136,9 +1136,9 @@ def submit_to_xiaoyang(order_id):
 
             try:
                 api = _get_xy_http_client()
-                modal = os.environ.get("XIAOYANG_MODAL_KEY", "motion_v26")
-                option = os.environ.get("XIAOYANG_OPTION_KEY", "default")
-                prompt = (data.get("prompt") or os.environ.get(
+                modal = get_env("XIAOYANG_MODAL_KEY", "motion_v26")
+                option = get_env("XIAOYANG_OPTION_KEY", "default")
+                prompt = (data.get("prompt") or get_env(
                     "XIAOYANG_PROMPT", "Follow the reference motion naturally"
                 )).strip()
                 from xiaoyang_direct import direct_worker_base
@@ -1153,7 +1153,7 @@ def submit_to_xiaoyang(order_id):
                     prompt,
                     image_url=img_url,
                     video_url=vid_url,
-                    motion_orientation=os.environ.get("XIAOYANG_MOTION_ORIENTATION", "video"),
+                    motion_orientation=get_env("XIAOYANG_MOTION_ORIENTATION", "video"),
                 )
                 task_id = resp.get("task_id")
                 if not task_id:

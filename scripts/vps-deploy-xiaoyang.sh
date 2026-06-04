@@ -10,6 +10,10 @@ git pull origin main
 
 ENV_FILE=".env"
 touch "$ENV_FILE"
+if [ -f "$ENV_FILE" ]; then
+  sed -i 's/\r$//' "$ENV_FILE" 2>/dev/null || sed -i '' 's/\r$//' "$ENV_FILE" 2>/dev/null || true
+  echo "  đã chuẩn hóa CRLF trong .env"
+fi
 ensure_env() {
   local key="$1"
   local val="$2"
