@@ -140,7 +140,17 @@ def mirror_url_to_direct(url: str, *, folder: str) -> str:
             f"URL không phải Workers và cũng không phải link file trực tiếp: {url[:120]}"
         )
     data, ctype = _fetch_bytes(url)
-    ext = ".png" if "image" in ctype else ".mp4" if "video" in ctype else ".bin"
+    cl = ctype.lower()
+    if "jpeg" in cl or "jpg" in cl or data[:2] == b"\xff\xd8":
+        ext = ".jpg"
+    elif "png" in cl or data[:8] == b"\x89PNG\r\n\x1a\n":
+        ext = ".png"
+    elif "webp" in cl:
+        ext = ".webp"
+    elif "video" in cl or (len(data) >= 8 and data[4:8] == b"ftyp"):
+        ext = ".mp4"
+    else:
+        ext = ".bin"
     fname = _guess_filename(url, f"media{ext}")
 
     if direct_worker_base():

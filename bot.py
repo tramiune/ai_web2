@@ -1178,11 +1178,12 @@ def submit_to_xiaoyang(order_id):
                 _session_error_backoff[order_id] = time.time() + SESSION_ERROR_BACKOFF_SEC
                 if isinstance(e, XiaoyangAuthError):
                     _reset_xy_http_client()
+                user_note = USER_NOTE_FILES_INVALID if isinstance(e, MediaValidationError) else USER_NOTE_SUBMIT_FAILED
                 _fail_order_processing(
                     doc,
                     data,
                     str(e),
-                    USER_NOTE_SUBMIT_FAILED,
+                    user_note,
                     "submit xiaoyang",
                 )
     finally:

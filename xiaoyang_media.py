@@ -95,6 +95,40 @@ def _png_size(data: bytes) -> tuple[int, int] | None:
     return w, h
 
 
+def _jpeg_size(data: bytes) -> tuple[int, int] | None:
+    """Đọc kích thước JPEG cơ bản (SOF marker) — đủ để xác nhận là ảnh."""
+    if len(data) < 4 or data[:2] != b"\xff\xd8":
+        return None
+    i = 2
+    while i + 9 < len(data):
+        if data[i] != 0xFF:
+            i += 1
+            continue
+        marker = data[i + 1]
+        if marker in (0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB):
+            h, w = struct.unpack(">HH", data[i + 5 : i + 9])
+            return w, h
+        if marker in (0xD0, 0xD1, 0xD2, 0xD3, 0xD4, 0xD5, 0xD6, 0xD7, 0xD8, 0xD9):
+            i += 2
+            continue
+        seg_len = struct.unpack(">H", data[i + 2 : i + 4])[0] if i + 4 <= len(data) else 0
+        if seg_len < 2:
+            break
+        i += 2 + seg_len
+    return None
+
+
+def _image_kind_from_bytes(data: bytes, ctype: str) -> str | None:
+    ctype = (ctype or "").lower()
+    if "png" in ctype or data[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image"
+    if "jpeg" in ctype or "jpg" in ctype or data[:2] == b"\xff\xd8":
+        return "image"
+    if "webp" in ctype or (len(data) >= 12 and data[:4] == b"RIFF" and data[8:12] == b"WEBP"):
+        return "image"
+    return None
+
+
 def probe_media_url(url: str, timeout: int = 60) -> dict:
     """GET URL và trả metadata cơ bản."""
     url = normalize_public_media_url(url)
@@ -118,12 +152,12 @@ def probe_media_url(url: str, timeout: int = 60) -> dict:
     data = b"".join(chunks)
     ctype = (r.headers.get("Content-Type") or "").split(";")[0].strip().lower()
     info = {"url": url, "content_type": ctype, "bytes": size, "status": r.status_code}
-    if "png" in ctype or data[:8] == b"\x89PNG\r\n\x1a\n":
+    if _image_kind_from_bytes(data, ctype) == "image":
         info["kind"] = "image"
-        wh = _png_size(data)
+        wh = _png_size(data) or _jpeg_size(data)
         if wh:
             info["width"], info["height"] = wh
-    elif "video" in ctype or data[4:8] == b"ftyp":
+    elif "video" in ctype or (len(data) >= 8 and data[4:8] == b"ftyp"):
         info["kind"] = "video"
         dur = _mp4_duration_sec(data)
         if dur is not None:
