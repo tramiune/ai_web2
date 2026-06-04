@@ -13,7 +13,10 @@ from datetime import datetime, timezone
 from firebase_admin import credentials, firestore
 from google.cloud.firestore_v1.base_query import FieldFilter
 from playwright.sync_api import sync_playwright
-from aidancing_api import AidancingApiClient
+from aidancing_api import AidancingApiClient, SessionExpiredError
+from xiaoyang_api import XiaoyangApiClient, XiaoyangAuthError, XiaoyangApiError
+from xiaoyang_direct import DirectMediaError
+from xiaoyang_media import MediaValidationError
 
 # --- CONFIGURATION ---
 cred = credentials.Certificate("serviceAccountKey.json")
@@ -47,51 +50,44 @@ _pending_worker_started = False
 _submitting_orders = set()
 _submitting_orders_lock = threading.Lock()
 MIN_RENDER_SEC = int(os.environ.get("BOT_MIN_RENDER_SEC", "600"))
+RENDER_PROVIDER_AIDANCING = "aidancing"
+RENDER_PROVIDER_XIAOYANG = "xiaoyang"
+_active_render_provider = RENDER_PROVIDER_AIDANCING
+_active_render_provider_lock = threading.Lock()
 _processing_cache = {}
 _processing_cache_lock = threading.Lock()
-HEARTBEAT_SEC = int(os.environ.get("BOT_HEARTBEAT_SEC", "60"))
+_xy_http_client = None
+_xy_http_client_lock = threading.Lock()
 
 
-class PersistentApiPool:
-    """Giữ 1 kết nối CDP + 1 tab nền suốt phiên bot — không mở/đóng Chrome mỗi lần poll."""
-
-    def __init__(self):
-        self._playwright = None
-        self._browser = None
-        self._api = None
-
-    def get(self):
-        if self._api is not None and self._api._page_alive():
-            return self._api
-        self.reset()
-        self._playwright = sync_playwright().start()
-        self._browser = launch_aidancing_browser(self._playwright)
-        self._api = AidancingApiClient(self._browser.context, persistent=True)
-        print("🔌 Session API cố định — 1 tab nền (fetch API, không reload dashboard)")
-        return self._api
-
-    def reset(self):
-        if self._api:
-            try:
-                self._api.shutdown()
-            except Exception:
-                pass
-        self._api = None
-        if self._browser:
-            try:
-                self._browser.close()
-            except Exception:
-                pass
-        self._browser = None
-        if self._playwright:
-            try:
-                self._playwright.stop()
-            except Exception:
-                pass
-        self._playwright = None
+def _pop_processing_cache(order_id):
+    with _processing_cache_lock:
+        _processing_cache.pop(order_id, None)
 
 
-_api_pool = PersistentApiPool()
+def _order_already_completed(order_id):
+    """Re-fetch Firestore — tránh hoàn đơn / spam Telegram lặp."""
+    try:
+        snap = db.collection('orders').document(order_id).get()
+        if not snap.exists:
+            return True
+        d = snap.to_dict() or {}
+        return d.get('status') == 'completed' or bool(d.get('resultLink'))
+    except Exception as e:
+        print(f"⚠️ Không đọc được đơn {order_id}: {e}")
+        return False
+
+
+def _skip_if_order_done(order_id, reason):
+    if _order_already_completed(order_id):
+        print(f"⏭️ Bỏ qua đơn {order_id} — {reason}")
+        _pop_processing_cache(order_id)
+        return True
+    return False
+
+
+_http_client = None
+_http_client_lock = threading.Lock()
 
 _pw_queue = queue.Queue()
 _pw_worker_started = False
@@ -138,21 +134,90 @@ def run_playwright(fn, *args, **kwargs):
     return done["result"]
 
 
-def _persistent_api():
-    return run_playwright(_api_pool.get)
+def _get_http_client():
+    global _http_client
+    with _http_client_lock:
+        if _http_client is None:
+            _http_client = AidancingApiClient()
+        return _http_client
 
 
-def _reset_persistent_api():
-    run_playwright(_api_pool.reset)
+def _reset_http_client():
+    global _http_client
+    with _http_client_lock:
+        _http_client = None
 
 
-def _pw_create_job(model_id, char_path, vid_path):
-    api = _api_pool.get()
+def get_active_render_provider():
+    with _active_render_provider_lock:
+        return _active_render_provider
+
+
+def _order_render_provider(order_data: dict) -> str:
+    if not order_data:
+        return RENDER_PROVIDER_AIDANCING
+    rp = (order_data.get("renderProvider") or "").strip().lower()
+    if rp in (RENDER_PROVIDER_AIDANCING, RENDER_PROVIDER_XIAOYANG):
+        return rp
+    if order_data.get("xiaoyangTaskId"):
+        return RENDER_PROVIDER_XIAOYANG
+    return RENDER_PROVIDER_AIDANCING
+
+
+def _get_xy_http_client():
+    global _xy_http_client
+    with _xy_http_client_lock:
+        if _xy_http_client is None:
+            _xy_http_client = XiaoyangApiClient()
+        return _xy_http_client
+
+
+def _reset_xy_http_client():
+    global _xy_http_client
+    with _xy_http_client_lock:
+        _xy_http_client = None
+
+
+def start_render_provider_listener():
+    """Admin đổi engine render — đơn processing vẫn theo renderProvider đã gắn lúc nạp."""
+
+    def on_render_settings(keys, changes, read_time):
+        global _active_render_provider
+        provider = RENDER_PROVIDER_AIDANCING
+        for change in changes:
+            doc = change.document
+            if getattr(doc, "exists", False):
+                provider = (doc.to_dict() or {}).get("activeProvider", RENDER_PROVIDER_AIDANCING)
+            break
+        provider = (provider or RENDER_PROVIDER_AIDANCING).strip().lower()
+        if provider not in (RENDER_PROVIDER_AIDANCING, RENDER_PROVIDER_XIAOYANG):
+            provider = RENDER_PROVIDER_AIDANCING
+        with _active_render_provider_lock:
+            prev = _active_render_provider
+            _active_render_provider = provider
+        if provider != prev:
+            print(f"\n🔀 Render provider: {prev} → {provider} (đơn đang chạy giữ engine cũ)\n")
+
+    doc = db.collection("settings").document("render").get()
+    initial = RENDER_PROVIDER_AIDANCING
+    if doc.exists:
+        initial = (doc.to_dict() or {}).get("activeProvider", RENDER_PROVIDER_AIDANCING)
+    initial = (initial or RENDER_PROVIDER_AIDANCING).strip().lower()
+    if initial not in (RENDER_PROVIDER_AIDANCING, RENDER_PROVIDER_XIAOYANG):
+        initial = RENDER_PROVIDER_AIDANCING
+    with _active_render_provider_lock:
+        _active_render_provider = initial
+    print(f"🎬 Render provider (đơn mới): {initial}")
+    db.collection("settings").document("render").on_snapshot(on_render_settings)
+
+
+def _http_create_job(model_id, char_path, vid_path):
+    api = _get_http_client()
     return api.create_job(model_id, char_path, vid_path)
 
 
-def _pw_poll_orders(orders_to_check):
-    api = _api_pool.get()
+def _http_poll_orders(orders_to_check):
+    api = _get_http_client()
     job_ids = [str(doc.to_dict().get('aidancingJobId')) for doc in orders_to_check]
     jobs_map = api.find_jobs_by_ids(job_ids)
     for doc in orders_to_check:
@@ -165,6 +230,8 @@ def _pw_poll_orders(orders_to_check):
         status = (job.get('status') or '').upper()
         print(f"   status={status}, outputFileId={job.get('outputFileId')}")
         if status == 'COMPLETED' and job.get('outputFileId'):
+            if _skip_if_order_done(doc.id, "đã completed trên Firestore"):
+                continue
             print(f"🎉 Job {job_id} HOÀN TẤT — tải file {job['outputFileId']}...")
             try:
                 local_vid = api.download_file(job['outputFileId'], f"res_{doc.id}.mp4")
@@ -189,28 +256,101 @@ def _pw_poll_orders(orders_to_check):
                 'systemNote': 'Đơn hàng xử lý không thành công, hệ thống đã hoàn lại coin.',
                 'updatedAt': firestore.SERVER_TIMESTAMP
             })
+            _pop_processing_cache(doc.id)
         else:
             print(f"⏳ Job {job_id} vẫn {status}")
 
 
+def _fail_order_processing(doc, order_data, err_detail, system_note, context: str):
+    notify_internal_error_telegram(doc.id, order_data, err_detail, context)
+    cost_coins = order_data.get("costCoins", 0)
+    user_id = order_data.get("userId")
+    if cost_coins > 0 and user_id:
+        try:
+            db.collection("users").document(user_id).update({"coins": firestore.Increment(cost_coins)})
+        except Exception as e:
+            print(f"⚠️ Hoàn coin lỗi: {e}")
+    db.collection("orders").document(doc.id).update({
+        "status": "failed",
+        "adminNote": firestore.DELETE_FIELD,
+        "systemNote": system_note,
+        "updatedAt": firestore.SERVER_TIMESTAMP,
+    })
+    _pop_processing_cache(doc.id)
+
+
+def _http_poll_xiaoyang_orders(orders_to_check):
+    api = _get_xy_http_client()
+    for doc in orders_to_check:
+        task_id = str((doc.to_dict() or {}).get("xiaoyangTaskId") or "").strip()
+        if not task_id:
+            continue
+        print(f"🧐 XiaoYang — task {task_id} (đơn {doc.id})...")
+        try:
+            t = api.get_task(task_id)
+        except (XiaoyangAuthError, XiaoyangApiError) as e:
+            print(f"❌ Poll XiaoYang {task_id}: {e}")
+            if "401" in str(e) or "403" in str(e):
+                _reset_xy_http_client()
+            continue
+        st = (t.get("status") or "").upper()
+        err = t.get("error_message")
+        print(f"   status={st}" + (f" — {err}" if err else ""))
+        if st == "SUCCESS":
+            if _skip_if_order_done(doc.id, "đã completed trên Firestore"):
+                continue
+            print(f"🎉 XiaoYang task {task_id} HOÀN TẤT — tải video...")
+            try:
+                local_vid = api.download_task(task_id, f"res_{doc.id}.mp4")
+                if _complete_order_with_video(doc, local_vid):
+                    api.try_delete_task(task_id)
+            except Exception as e:
+                print(f"⚠️ Lỗi tải/hoàn đơn {doc.id}: {e}")
+        elif st == "FAIL":
+            order_data = doc.to_dict() or {}
+            print(f"❌ Task {task_id} FAIL trên XiaoYang")
+            _fail_order_processing(
+                doc,
+                order_data,
+                f"XiaoYang task {task_id} FAIL: {err or ''}",
+                "Đơn hàng xử lý không thành công (XiaoYang), hệ thống đã hoàn lại coin.",
+                "render xiaoyang",
+            )
+            api.try_delete_task(task_id)
+        else:
+            print(f"⏳ Task {task_id} vẫn {st} (QUEUED/PENDING/PROCESSING)")
+
+
 def _processing_monitor_state():
-    """Đọc từ RAM — không query Firestore mỗi lần poll."""
+    """Đọc từ RAM — poll sau MIN_RENDER_SEC từ submittedAt (giống Aidancing cho cả XY)."""
     now = datetime.now(timezone.utc)
-    eligible = []
+    ad_eligible = []
+    xy_eligible = []
     with _processing_cache_lock:
+        stale_ids = []
+        for oid, doc in _processing_cache.items():
+            d = doc.to_dict() or {}
+            if d.get("status") != "processing":
+                stale_ids.append(oid)
+        for oid in stale_ids:
+            _processing_cache.pop(oid, None)
         processing_count = len(_processing_cache)
         for doc in _processing_cache.values():
             d = doc.to_dict() or {}
-            job_id = d.get('aidancingJobId')
-            submitted_at = d.get('submittedAt')
-            if not job_id or job_id == "MANUAL":
+            if d.get("status") != "processing":
                 continue
-            if submitted_at:
-                if (now - submitted_at).total_seconds() > MIN_RENDER_SEC:
-                    eligible.append(doc)
+            submitted_at = d.get("submittedAt")
+            if submitted_at and (now - submitted_at).total_seconds() <= MIN_RENDER_SEC:
+                continue
+            rp = _order_render_provider(d)
+            if rp == RENDER_PROVIDER_XIAOYANG:
+                if d.get("xiaoyangTaskId"):
+                    xy_eligible.append(doc)
             else:
-                eligible.append(doc)
-    return eligible, processing_count
+                job_id = d.get("aidancingJobId")
+                if job_id and job_id != "MANUAL":
+                    ad_eligible.append(doc)
+    return ad_eligible, xy_eligible, processing_count
 
 
 def on_processing_orders_snapshot(keys, changes, read_time):
@@ -248,24 +388,6 @@ def _monitor_sleep_seconds(eligible_count, processing_count):
     return active
 
 
-def _warm_api_session_loop():
-    if not use_api_mode():
-        return
-    _ensure_playwright_worker()
-    while True:
-        if is_bot_enabled():
-            try:
-                run_playwright(_api_pool.get)
-                print("✅ Tab nền aidancing sẵn sàng — poll qua fetch (không F5 dashboard)")
-                return
-            except Exception as e:
-                print(f"⚠️ Chờ Chrome CDP để khởi tạo session API: {e}")
-                try:
-                    run_playwright(_api_pool.reset)
-                except Exception:
-                    pass
-        time.sleep(20)
-
 def ensure_cdp_available(cdp_url, timeout=3):
     try:
         url = cdp_url.rstrip("/") + "/json/version"
@@ -299,7 +421,7 @@ def _pending_order_worker():
             if _pending_order_queue:
                 order_id = _pending_order_queue.pop(0)
         if order_id:
-            submit_to_aidancing(order_id)
+            submit_order(order_id)
         else:
             time.sleep(0.5)
 
@@ -527,34 +649,15 @@ def ensure_bot_registered():
             'enabled': False,
             'hostname': socket.gethostname(),
             'createdAt': now,
-            'lastSeenAt': now,
             'startedAt': now,
         })
         print(f"🆕 Bot mới đăng ký trên Firestore: {BOT_NAME} (mặc định TẮT — bật trên Admin)")
     else:
         ref.set({
             'name': BOT_NAME,
-            'lastSeenAt': now,
             'startedAt': now,
             'hostname': socket.gethostname(),
         }, merge=True)
-
-def bot_heartbeat_loop():
-    while True:
-        try:
-            if BOT_NAME:
-                ref = db.collection('bots').document(BOT_NAME)
-                try:
-                    ref.update({'lastSeenAt': firestore.SERVER_TIMESTAMP})
-                except Exception as e:
-                    # Doc bị admin xóa — đăng ký lại đầy đủ (cùng tên = cùng 1 bot)
-                    if 'NOT_FOUND' in str(e) or 'No document to update' in str(e):
-                        ensure_bot_registered()
-                    else:
-                        raise
-        except Exception as e:
-            print(f"⚠️ Heartbeat lỗi: {e}")
-        time.sleep(HEARTBEAT_SEC)
 
 def on_bot_config_snapshot(keys, changes, read_time):
     # Document watch callback: (sorted_keys, DocumentChange[], read_time) — not a DocumentSnapshot.
@@ -582,7 +685,6 @@ def start_bot_control_listener():
         print("⏸️  Bot đang TẮT. Vào Admin → Bots để bật.")
 
     db.collection('bots').document(BOT_NAME).on_snapshot(on_bot_config_snapshot)
-    threading.Thread(target=bot_heartbeat_loop, daemon=True).start()
 
 def send_telegram_message(text):
     try:
@@ -875,10 +977,18 @@ def send_completion_email(order_id, order_data, result_link):
         print(f"❌ Lỗi kết nối khi gửi email thông báo qua EmailJS: {e}")
 
 def use_api_mode():
-    return os.environ.get("BOT_MODE", "browser").strip().lower() == "api"
+    """Pure HTTP — không cần Chrome/Playwright (cookie AIDANCING_COOKIE)."""
+    return os.environ.get("BOT_MODE", "browser").strip().lower() in ("api", "http")
 
 def _complete_order_with_video(doc, local_vid):
     """Upload R2 + cập nhật Firestore + thông báo."""
+    order_id = doc.id
+    if _order_already_completed(order_id):
+        print(f"⏭️ Đơn {order_id} đã completed — không gửi lại Telegram/R2")
+        _pop_processing_cache(order_id)
+        if os.path.exists(local_vid):
+            os.remove(local_vid)
+        return True
     r2_url = upload_to_r2(local_vid)
     if not r2_url:
         return False
@@ -912,37 +1022,146 @@ def _complete_order_with_video(doc, local_vid):
         print(f"⚠️ Không gửi được email thông báo: {mail_err}")
     if os.path.exists(local_vid):
         os.remove(local_vid)
+    _pop_processing_cache(order_id)
     return True
 
 def check_finished_orders_api():
-    """Monitor qua GET /api/proxy/jobs — fetch trên tab nền, không reload."""
+    """Monitor Aidancing + XiaoYang — Pure HTTP."""
     if not is_bot_enabled() or browser_lock.locked():
         return
-    orders_to_check, _ = _processing_monitor_state()
-    if not orders_to_check:
+    ad_orders, xy_orders, _ = _processing_monitor_state()
+    if not ad_orders and not xy_orders:
         return
 
-    print(f"\n🔍 [MONITOR/API] Poll {len(orders_to_check)} đơn (fetch, không reload trang)...")
+    print(
+        f"\n🔍 [MONITOR/HTTP] Poll Aidancing={len(ad_orders)} XiaoYang={len(xy_orders)} "
+        f"(sau {MIN_RENDER_SEC // 60}p từ submittedAt)..."
+    )
     with browser_lock:
-        try:
-            run_playwright(_pw_poll_orders, orders_to_check)
-        except Exception as e:
-            err = str(e)
-            print(f"❌ Lỗi monitor API: {e}")
-            if any(x in err for x in ('ECONNREFUSED', 'Chrome CDP', 'connect_over_cdp', 'Target closed', 'different thread')):
+        if ad_orders:
+            try:
+                _http_poll_orders(ad_orders)
+            except SessionExpiredError as e:
+                print(f"❌ Session hết hạn: {e}")
+                _reset_http_client()
+            except Exception as e:
+                err = str(e)
+                print(f"❌ Lỗi monitor Aidancing HTTP: {e}")
+                if any(x in err.lower() for x in ("401", "403", "session expired", "aidancing_cookie")):
+                    _reset_http_client()
+        if xy_orders:
+            try:
+                _http_poll_xiaoyang_orders(xy_orders)
+            except Exception as e:
+                print(f"❌ Lỗi monitor XiaoYang HTTP: {e}")
+
+def _mark_order_processing(doc_ref, job_id, *, provider=RENDER_PROVIDER_AIDANCING):
+    """Chỉ chuyển processing sau khi engine render đã nhận job."""
+    payload = {
+        "status": "processing",
+        "renderProvider": provider,
+        "submittedAt": firestore.SERVER_TIMESTAMP,
+        "updatedAt": firestore.SERVER_TIMESTAMP,
+    }
+    if provider == RENDER_PROVIDER_XIAOYANG:
+        payload["xiaoyangTaskId"] = str(job_id)
+    else:
+        payload["aidancingJobId"] = str(job_id)
+    doc_ref.update(payload)
+
+
+def submit_order(order_id):
+    """Nạp đơn theo renderProvider đang chọn (Admin). Đơn processing giữ engine cũ."""
+    provider = get_active_render_provider()
+    if provider == RENDER_PROVIDER_XIAOYANG:
+        submit_to_xiaoyang(order_id)
+    else:
+        submit_to_aidancing(order_id)
+
+
+def submit_to_xiaoyang(order_id):
+    if not is_bot_enabled():
+        print(f"⏸️ [{BOT_NAME}] Bot TẮT — bỏ qua nạp đơn {order_id}")
+        return
+    if _pending_submit_backoff_active(order_id):
+        return
+    with _submitting_orders_lock:
+        if order_id in _submitting_orders:
+            print(f"⏭️ [{BOT_NAME}] Đơn {order_id} đang nạp — bỏ qua trùng lặp")
+            return
+        _submitting_orders.add(order_id)
+    try:
+        with browser_lock:
+            doc_ref = db.collection("orders").document(order_id)
+            doc = doc_ref.get()
+            if not doc.exists:
+                return
+            data = doc.to_dict() or {}
+            if data.get("status") != "pending":
+                return
+
+            print(f"\n⚡ [NẠP ĐƠN / XiaoYang] {order_id}...")
+            img_url = (data.get("characterImageLink") or "").strip()
+            vid_url = (data.get("referenceVideoLink") or "").strip()
+            if not img_url or not vid_url:
+                print(f"❌ Thiếu link ảnh/video cho đơn {order_id}")
+                _fail_order_processing(
+                    doc,
+                    data,
+                    "Thiếu characterImageLink hoặc referenceVideoLink",
+                    "Thiếu ảnh hoặc video tham chiếu, hệ thống đã hoàn lại coin.",
+                    "submit xiaoyang",
+                )
+                return
+
+            try:
+                api = _get_xy_http_client()
+                modal = os.environ.get("XIAOYANG_MODAL_KEY", "motion_v26")
+                option = os.environ.get("XIAOYANG_OPTION_KEY", "default")
+                prompt = (data.get("prompt") or os.environ.get(
+                    "XIAOYANG_PROMPT", "Follow the reference motion naturally"
+                )).strip()
+                print(f"🚀 [XiaoYang HTTP] motion {modal}/{option}...")
+                resp = api.create_task(
+                    modal,
+                    option,
+                    prompt,
+                    image_url=img_url,
+                    video_url=vid_url,
+                    motion_orientation=os.environ.get("XIAOYANG_MOTION_ORIENTATION", "video"),
+                )
+                task_id = resp.get("task_id")
+                if not task_id:
+                    raise XiaoyangApiError(f"Không có task_id: {resp}")
+                print(f"🆔 [XiaoYang] task: {task_id} ({resp.get('status')})")
+                _mark_order_processing(doc_ref, task_id, provider=RENDER_PROVIDER_XIAOYANG)
+                _session_error_backoff.pop(order_id, None)
+                print(f"✅ Đơn {order_id} → processing (XiaoYang)")
                 try:
-                    run_playwright(_api_pool.reset)
+                    short_id = order_id[-6:].upper()
+                    send_telegram_message(
+                        f"⚙️ <b>ĐƠN HÀNG ĐANG XỬ LÝ</b> (XiaoYang)\n\n"
+                        f"🆔 Mã đơn: #{short_id}\n"
+                        f"🤖 Task: <code>{task_id}</code>\n"
+                        f"⏳ Poll sau {MIN_RENDER_SEC // 60} phút..."
+                    )
                 except Exception:
                     pass
-
-def _mark_order_processing(doc_ref, job_id):
-    """Chỉ chuyển processing sau khi aidancing đã nhận job."""
-    doc_ref.update({
-        'status': 'processing',
-        'aidancingJobId': str(job_id),
-        'submittedAt': firestore.SERVER_TIMESTAMP,
-        'updatedAt': firestore.SERVER_TIMESTAMP,
-    })
+            except (XiaoyangAuthError, XiaoyangApiError, DirectMediaError, MediaValidationError, ValueError) as e:
+                print(f"❌ Nạp XiaoYang thất bại {order_id}: {e}")
+                _session_error_backoff[order_id] = time.time() + SESSION_ERROR_BACKOFF_SEC
+                if isinstance(e, XiaoyangAuthError):
+                    _reset_xy_http_client()
+                _fail_order_processing(
+                    doc,
+                    data,
+                    str(e),
+                    "Không thể gửi đơn lên XiaoYang, hệ thống đã hoàn lại coin.",
+                    "submit xiaoyang",
+                )
+    finally:
+        with _submitting_orders_lock:
+            _submitting_orders.discard(order_id)
 
 
 def submit_to_aidancing(order_id):
@@ -1023,9 +1242,9 @@ def submit_to_aidancing(order_id):
             if use_api_mode():
                 try:
                     model_id = data.get('modelId', '124')
-                    print(f"🚀 [API] Nạp đơn model {model_id}...")
-                    job_id = run_playwright(_pw_create_job, model_id, char_path, vid_path)
-                    print(f"🆔 [API] Job mới: {job_id}")
+                    print(f"🚀 [HTTP] Nạp đơn model {model_id}...")
+                    job_id = _http_create_job(model_id, char_path, vid_path)
+                    print(f"🆔 [HTTP] Job mới: {job_id}")
                     _mark_order_processing(doc_ref, job_id)
                     _session_error_backoff.pop(order_id, None)
                     print(f"✅ Đơn {order_id} → processing (aidancing đã nhận job)")
@@ -1035,20 +1254,21 @@ def submit_to_aidancing(order_id):
                             f"⚙️ <b>ĐƠN HÀNG ĐANG XỬ LÝ</b>\n\n"
                             f"🆔 Mã đơn: #{short_id}\n"
                             f"🤖 Job ID aidancing: <code>{job_id}</code>\n"
-                            f"⏳ Đang render (API mode)..."
+                            f"⏳ Đang render (HTTP mode)..."
                         )
                         send_telegram_message(msg)
                     except Exception:
                         pass
+                except SessionExpiredError as e:
+                    print(f"❌ Session hết hạn: {e}")
+                    _reset_http_client()
+                    apply_bot_error_update(doc_ref, order_id, data, str(e), 'nạp HTTP')
                 except Exception as e:
-                    print(f"❌ Lỗi nạp API: {e}")
+                    print(f"❌ Lỗi nạp HTTP: {e}")
                     err = str(e)
-                    if any(x in err for x in ('ECONNREFUSED', 'Chrome CDP chưa chạy', 'connect_over_cdp', 'Target closed', 'different thread')):
-                        try:
-                            run_playwright(_api_pool.reset)
-                        except Exception:
-                            pass
-                    apply_bot_error_update(doc_ref, order_id, data, err, 'nạp API')
+                    if any(x in err.lower() for x in ('401', '403', 'session expired', 'aidancing_cookie')):
+                        _reset_http_client()
+                    apply_bot_error_update(doc_ref, order_id, data, err, 'nạp HTTP')
                 finally:
                     if char_path and os.path.exists(char_path):
                         os.remove(char_path)
@@ -1154,11 +1374,12 @@ def check_finished_orders():
         if browser_lock.locked():
             return
 
-        orders_to_check, _ = _processing_monitor_state()
-        if not orders_to_check:
+        ad_orders, _, _ = _processing_monitor_state()
+        if not ad_orders:
             return
 
-        print(f"\n🔍 [MONITOR] Đang rình kết quả cho {len(orders_to_check)} đơn đủ {MIN_RENDER_SEC // 60}p...")
+        print(f"\n🔍 [MONITOR] Đang rình kết quả Aidancing cho {len(ad_orders)} đơn đủ {MIN_RENDER_SEC // 60}p...")
+        orders_to_check = ad_orders
         with browser_lock:
             with sync_playwright() as p:
                 browser = launch_aidancing_browser(p)
@@ -1382,8 +1603,8 @@ def start_bot():
     global BOT_NAME
     parser = argparse.ArgumentParser(description='Wallpaper/Nhay Cloud order bot — aidancing.net')
     parser.add_argument('--name', required=True, help='Tên bot duy nhất (vd: aidancing-vps1, bot-may-nha)')
-    parser.add_argument('--mode', choices=['browser', 'api'], default=None,
-                        help='browser=scrape dashboard (mặc định), api=gọi /api/proxy/jobs')
+    parser.add_argument('--mode', choices=['browser', 'api', 'http'], default=None,
+                        help='browser=Playwright; api/http=Pure HTTP (AIDANCING_COOKIE, không Chrome)')
     args = parser.parse_args()
     if args.mode:
         os.environ['BOT_MODE'] = args.mode
@@ -1392,7 +1613,7 @@ def start_bot():
         print("❌ Tên bot không hợp lệ. Dùng: python bot.py --name aidancing-vps1")
         sys.exit(1)
 
-    print(f"📡 Wallpaper BOT [{BOT_NAME}] (v3.8 - mode={os.environ.get('BOT_MODE', 'browser')}) đang khởi động...")
+    print(f"📡 Wallpaper BOT [{BOT_NAME}] (v3.9 xy+ad - mode={os.environ.get('BOT_MODE', 'browser')}) đang khởi động...")
     cdp_url = os.environ.get("BOT_CDP_URL", "").strip()
     if cdp_url:
         if ensure_cdp_available(cdp_url):
@@ -1401,19 +1622,28 @@ def start_bot():
             print(f"⚠️  BOT_CDP_URL={cdp_url} nhưng Chrome chưa mở CDP!")
             print("    → Mở Chrome CDP ở terminal KHÁC trước, giữ chạy, rồi bot mới nối được.")
     start_bot_control_listener()
+    start_render_provider_listener()
     start_processing_listener()
 
     if use_api_mode():
-        _ensure_playwright_worker()
-        threading.Thread(target=_warm_api_session_loop, daemon=True).start()
+        try:
+            _get_http_client()
+            print("✅ Pure HTTP — AIDANCING_COOKIE (không cần Chrome/CDP)")
+        except ValueError as e:
+            print(f"⚠️  Chưa cấu hình cookie: {e}")
+        try:
+            me = _get_xy_http_client().me()
+            print(f"✅ XiaoYang API — {me.get('email', '?')} | credits: {me.get('credits', '?')}")
+        except Exception as e:
+            print(f"⚠️  XiaoYang API: {e}")
 
     def monitor_loop():
         while True:
-            eligible, processing = _processing_monitor_state()
+            ad_eligible, xy_eligible, processing = _processing_monitor_state()
             if is_bot_enabled():
                 check_finished_orders()
             if use_api_mode():
-                sleep_sec = _monitor_sleep_seconds(len(eligible), processing)
+                sleep_sec = _monitor_sleep_seconds(len(ad_eligible) + len(xy_eligible), processing)
             else:
                 sleep_sec = 60 if processing else int(os.environ.get("BOT_POLL_IDLE_SEC", "300"))
             time.sleep(sleep_sec)
