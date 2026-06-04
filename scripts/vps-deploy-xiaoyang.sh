@@ -27,7 +27,12 @@ ensure_env() {
 
 echo "==> kiểm tra .env XiaoYang"
 ensure_env "XIAOYANG_DIRECT_WORKER_URL" "https://xiaoyang-direct-media.traderfinn0312.workers.dev"
-ensure_env "XIAOYANG_MODAL_KEY" "motion_v30"
+if grep -q "^XIAOYANG_MODAL_KEY=" "$ENV_FILE" 2>/dev/null; then
+  sed -i 's/^XIAOYANG_MODAL_KEY=.*/XIAOYANG_MODAL_KEY=motion_v30/' "$ENV_FILE"
+  echo "  cập nhật XIAOYANG_MODAL_KEY=motion_v30"
+else
+  ensure_env "XIAOYANG_MODAL_KEY" "motion_v30"
+fi
 ensure_env "XIAOYANG_OPTION_KEY" "default"
 ensure_env "XIAOYANG_MOTION_ORIENTATION" "video"
 if ! grep -q "^XIAOYANG_API_KEY=" "$ENV_FILE" 2>/dev/null; then
