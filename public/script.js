@@ -549,7 +549,7 @@ export async function initAppLogic() {
 
     // (Intro modal removed; login-required uses auth-modal)
 
-    const { auth, onAuthStateChanged } = window.firebase;
+    const { auth, onAuthStateChanged, signInAnonymously } = window.firebase;
 
     showAuthLoading();
 

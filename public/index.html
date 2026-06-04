@@ -1209,7 +1209,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
         import { getAnalytics, logEvent } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-analytics.js";
-        import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
+        import { getAuth, GoogleAuthProvider, signInWithPopup, signInAnonymously, signOut, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
         import { getFirestore, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, collection, addDoc, query, where, onSnapshot, orderBy, limit, runTransaction, serverTimestamp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
         import { getStorage, ref, uploadBytesResumable, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-storage.js";
 
@@ -1223,7 +1223,7 @@
         const storage = getStorage(app);
 
         // Make Firebase available globally for script.js
-        window.firebase = { auth, db, storage, analytics, logEvent, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, collection, addDoc, query, where, onSnapshot, orderBy, limit, runTransaction, serverTimestamp, ref, uploadBytesResumable, getDownloadURL };
+        window.firebase = { auth, db, storage, analytics, logEvent, GoogleAuthProvider, signInWithPopup, signInAnonymously, signOut, onAuthStateChanged, createUserWithEmailAndPassword, signInWithEmailAndPassword, doc, getDoc, getDocs, setDoc, updateDoc, deleteDoc, collection, addDoc, query, where, onSnapshot, orderBy, limit, runTransaction, serverTimestamp, ref, uploadBytesResumable, getDownloadURL };
         window.ADMIN_EMAILS = ADMIN_EMAILS;
 
         initAppLogic().catch(err => console.error('initAppLogic failed:', err));
