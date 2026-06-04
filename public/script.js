@@ -2717,8 +2717,88 @@ function scheduleRenderAdminBots() {
     }, 400);
 }
 
+let adminActiveRenderProvider = 'aidancing';
+
+function subscribeAdminRenderProvider() {
+    if (!window.__isAdmin) return;
+    if (fbHas('adminRenderProvider')) {
+        renderAdminRenderProviderUI();
+        return;
+    }
+    const { db, doc, onSnapshot } = window.firebase;
+    fbSub('adminRenderProvider', onSnapshot(doc(db, 'settings', 'render'), (snap) => {
+        adminActiveRenderProvider = snap.exists()
+            ? (snap.data().activeProvider || 'aidancing')
+            : 'aidancing';
+        if (!['aidancing', 'xiaoyang'].includes(adminActiveRenderProvider)) {
+            adminActiveRenderProvider = 'aidancing';
+        }
+        renderAdminRenderProviderUI();
+    }, (err) => {
+        console.error('Admin render provider error:', err);
+    }));
+}
+
+function renderAdminRenderProviderUI() {
+    const activeEl = document.getElementById('admin-render-provider-active');
+    const queueEl = document.getElementById('admin-render-provider-queue');
+    const btnAd = document.getElementById('admin-rp-aidancing');
+    const btnXy = document.getElementById('admin-rp-xiaoyang');
+    const p = adminActiveRenderProvider;
+    if (activeEl) {
+        activeEl.textContent = p === 'xiaoyang'
+            ? t('admin.render_provider_active_xy')
+            : t('admin.render_provider_active_ad');
+        activeEl.style.color = p === 'xiaoyang' ? '#a78bfa' : '#4ade80';
+    }
+    if (btnAd) btnAd.style.outline = p === 'aidancing' ? '2px solid #4ade80' : '';
+    if (btnXy) btnXy.style.outline = p === 'xiaoyang' ? '2px solid #a78bfa' : '';
+    if (queueEl) {
+        refreshRenderProviderQueueHint(queueEl);
+    }
+}
+
+async function refreshRenderProviderQueueHint(el) {
+    if (!window.__isAdmin || !el) return;
+    try {
+        const { db, collection, query, where, getDocs } = window.firebase;
+        const snap = await getDocs(query(collection(db, 'orders'), where('status', '==', 'processing')));
+        let ad = 0;
+        let xy = 0;
+        snap.forEach(d => {
+            const x = d.data();
+            const rp = x.renderProvider || (x.xiaoyangTaskId ? 'xiaoyang' : 'aidancing');
+            if (rp === 'xiaoyang') xy++;
+            else ad++;
+        });
+        el.textContent = t('admin.render_provider_processing', { ad, xy });
+    } catch (e) {
+        el.textContent = '';
+    }
+}
+
+window.setRenderProvider = async (provider) => {
+    if (!window.__isAdmin) return;
+    if (!['aidancing', 'xiaoyang'].includes(provider)) return;
+    const { db, doc, setDoc, serverTimestamp } = window.firebase;
+    try {
+        await setDoc(doc(db, 'settings', 'render'), {
+            activeProvider: provider,
+            updatedAt: serverTimestamp(),
+            updatedBy: currentUser?.email || ''
+        }, { merge: true });
+        showToast(provider === 'xiaoyang'
+            ? t('admin.render_provider_toast_xy')
+            : t('admin.render_provider_toast_ad'));
+    } catch (e) {
+        showToast(t('common.error_with_msg', { msg: e.message }));
+    }
+};
+
 function subscribeAdminBots() {
     if (!window.__isAdmin) return;
+
+    subscribeAdminRenderProvider();
 
     if (fbHas('adminBots')) {
         renderAdminBots();
@@ -3395,6 +3475,7 @@ function refreshActiveAdminSubscription() {
         fbUnsub('adminUsers');
         fbUnsub('adminReferrals');
         fbUnsub('adminBots');
+        fbUnsub('adminRenderProvider');
         return;
     }
 
@@ -3403,24 +3484,28 @@ function refreshActiveAdminSubscription() {
         fbUnsub('adminUsers');
         fbUnsub('adminReferrals');
         fbUnsub('adminBots');
+        fbUnsub('adminRenderProvider');
         subscribeAdminOrders();
     } else if (adminActiveTab === 'topups') {
         fbUnsub('adminOrders');
         fbUnsub('adminUsers');
         fbUnsub('adminReferrals');
         fbUnsub('adminBots');
+        fbUnsub('adminRenderProvider');
         subscribeAdminTopups();
     } else if (adminActiveTab === 'users') {
         fbUnsub('adminOrders');
         fbUnsub('adminTopups');
         fbUnsub('adminReferrals');
         fbUnsub('adminBots');
+        fbUnsub('adminRenderProvider');
         subscribeAdminUsers();
     } else if (adminActiveTab === 'referrals') {
         fbUnsub('adminOrders');
         fbUnsub('adminTopups');
         fbUnsub('adminUsers');
         fbUnsub('adminBots');
+        fbUnsub('adminRenderProvider');
         subscribeAdminReferrals();
     } else if (adminActiveTab === 'bots') {
         fbUnsub('adminOrders');

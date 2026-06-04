@@ -650,6 +650,16 @@
 
         <!-- Tab: Bots -->
         <div id="admin-tab-bots" class="admin-tab-content">
+            <div class="admin-section" style="margin-bottom: 1.5rem; padding: 1rem 1.25rem; border-radius: 12px; border: 1px solid rgba(255,255,255,0.12); background: rgba(0,0,0,0.2);">
+                <h3 style="margin: 0 0 0.5rem 0;" data-i18n="admin.render_provider_title">Engine render (đơn mới)</h3>
+                <p style="margin: 0 0 1rem 0; opacity: 0.65; font-size: 0.85rem;" data-i18n="admin.render_provider_desc">Đơn đang processing vẫn chạy trên engine cũ. Chỉ đơn pending mới dùng lựa chọn bên dưới.</p>
+                <div style="display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: center;">
+                    <button type="button" class="btn-secondary" id="admin-rp-aidancing" onclick="window.setRenderProvider('aidancing')" data-i18n="admin.render_provider_aidancing">AiDancing</button>
+                    <button type="button" class="btn-secondary" id="admin-rp-xiaoyang" onclick="window.setRenderProvider('xiaoyang')" data-i18n="admin.render_provider_xiaoyang">XiaoYang</button>
+                    <span id="admin-render-provider-active" style="font-weight: 600; font-size: 0.9rem;"></span>
+                </div>
+                <p id="admin-render-provider-queue" style="margin: 0.75rem 0 0 0; font-size: 0.8rem; opacity: 0.7;"></p>
+            </div>
             <div class="admin-section">
                 <h2 style="margin: 0 0 0.5rem 0;" data-i18n="admin.bots_title">Quản lý Bot xử lý đơn</h2>
                 <p style="margin: 0 0 1.25rem 0; opacity: 0.65; font-size: 0.9rem;" data-i18n="admin.bots_desc">Mỗi máy chạy <code>python bot.py --name ten-bot</code>. Tắt ở đây thì bot không nạp đơn / không check kết quả.</p>
