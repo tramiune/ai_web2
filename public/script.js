@@ -3439,7 +3439,15 @@ function scheduleRenderAdminBots() {
     }, 400);
 }
 
-let adminActiveRenderProvider = 'aidancing';
+// Doc bots mà VPS dùng — admin đã có quyền ghi collection bots (không cần settings/render).
+const RENDER_PROVIDER_BOT_ID = 'nhaycloud_vps_bot';
+
+let adminActiveRenderProvider = 'xiaoyang';
+
+function normalizeRenderProvider(value) {
+    const p = (value || 'xiaoyang').toString().trim().toLowerCase();
+    return ['aidancing', 'xiaoyang'].includes(p) ? p : 'xiaoyang';
+}
 
 function subscribeAdminRenderProvider() {
     if (!window.__isAdmin) return;
@@ -3448,13 +3456,11 @@ function subscribeAdminRenderProvider() {
         return;
     }
     const { db, doc, onSnapshot } = window.firebase;
-    fbSub('adminRenderProvider', onSnapshot(doc(db, 'settings', 'render'), (snap) => {
-        adminActiveRenderProvider = snap.exists()
-            ? (snap.data().activeProvider || 'aidancing')
-            : 'aidancing';
-        if (!['aidancing', 'xiaoyang'].includes(adminActiveRenderProvider)) {
-            adminActiveRenderProvider = 'aidancing';
-        }
+    fbSub('adminRenderProvider', onSnapshot(doc(db, 'bots', RENDER_PROVIDER_BOT_ID), (snap) => {
+        const d = snap.exists() ? snap.data() : {};
+        adminActiveRenderProvider = normalizeRenderProvider(
+            d.activeRenderProvider || d.activeProvider
+        );
         renderAdminRenderProviderUI();
     }, (err) => {
         console.error('Admin render provider error:', err);
@@ -3501,14 +3507,14 @@ async function refreshRenderProviderQueueHint(el) {
 
 window.setRenderProvider = async (provider) => {
     if (!window.__isAdmin) return;
-    if (!['aidancing', 'xiaoyang'].includes(provider)) return;
-    const { db, doc, setDoc, serverTimestamp } = window.firebase;
+    provider = normalizeRenderProvider(provider);
+    const { db, doc, updateDoc, serverTimestamp } = window.firebase;
     try {
-        await setDoc(doc(db, 'settings', 'render'), {
-            activeProvider: provider,
+        await updateDoc(doc(db, 'bots', RENDER_PROVIDER_BOT_ID), {
+            activeRenderProvider: provider,
             updatedAt: serverTimestamp(),
             updatedBy: currentUser?.email || ''
-        }, { merge: true });
+        });
         showToast(provider === 'xiaoyang'
             ? t('admin.render_provider_toast_xy')
             : t('admin.render_provider_toast_ad'));

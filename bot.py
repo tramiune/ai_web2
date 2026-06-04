@@ -52,7 +52,7 @@ _submitting_orders_lock = threading.Lock()
 MIN_RENDER_SEC = int(os.environ.get("BOT_MIN_RENDER_SEC", "600"))
 RENDER_PROVIDER_AIDANCING = "aidancing"
 RENDER_PROVIDER_XIAOYANG = "xiaoyang"
-_active_render_provider = RENDER_PROVIDER_AIDANCING
+_active_render_provider = RENDER_PROVIDER_XIAOYANG
 _active_render_provider_lock = threading.Lock()
 _processing_cache = {}
 _processing_cache_lock = threading.Lock()
@@ -178,37 +178,48 @@ def _reset_xy_http_client():
         _xy_http_client = None
 
 
-def start_render_provider_listener():
-    """Admin đổi engine render — đơn processing vẫn theo renderProvider đã gắn lúc nạp."""
+def _normalize_render_provider(value, default=RENDER_PROVIDER_XIAOYANG):
+    p = (value or default).strip().lower()
+    if p not in (RENDER_PROVIDER_AIDANCING, RENDER_PROVIDER_XIAOYANG):
+        return default
+    return p
 
-    def on_render_settings(keys, changes, read_time):
-        global _active_render_provider
-        provider = RENDER_PROVIDER_AIDANCING
-        for change in changes:
-            doc = change.document
-            if getattr(doc, "exists", False):
-                provider = (doc.to_dict() or {}).get("activeProvider", RENDER_PROVIDER_AIDANCING)
-            break
-        provider = (provider or RENDER_PROVIDER_AIDANCING).strip().lower()
-        if provider not in (RENDER_PROVIDER_AIDANCING, RENDER_PROVIDER_XIAOYANG):
-            provider = RENDER_PROVIDER_AIDANCING
-        with _active_render_provider_lock:
-            prev = _active_render_provider
-            _active_render_provider = provider
-        if provider != prev:
-            print(f"\n🔀 Render provider: {prev} → {provider} (đơn đang chạy giữ engine cũ)\n")
 
-    doc = db.collection("settings").document("render").get()
-    initial = RENDER_PROVIDER_AIDANCING
-    if doc.exists:
-        initial = (doc.to_dict() or {}).get("activeProvider", RENDER_PROVIDER_AIDANCING)
-    initial = (initial or RENDER_PROVIDER_AIDANCING).strip().lower()
-    if initial not in (RENDER_PROVIDER_AIDANCING, RENDER_PROVIDER_XIAOYANG):
-        initial = RENDER_PROVIDER_AIDANCING
+def _apply_render_provider(provider, source=""):
+    global _active_render_provider
+    provider = _normalize_render_provider(provider)
     with _active_render_provider_lock:
-        _active_render_provider = initial
+        prev = _active_render_provider
+        _active_render_provider = provider
+    if provider != prev:
+        suffix = f" ({source})" if source else ""
+        print(f"\n🔀 Render provider: {prev} → {provider}{suffix} (đơn đang chạy giữ engine cũ)\n")
+    return provider
+
+
+def _render_provider_from_bot_data(data: dict) -> str:
+    if not data:
+        return RENDER_PROVIDER_XIAOYANG
+    return _normalize_render_provider(
+        data.get("activeRenderProvider") or data.get("activeProvider")
+    )
+
+
+def start_render_provider_listener():
+    """Đọc engine ban đầu từ bots/{BOT_NAME}; đổi realtime qua on_bot_config_snapshot."""
+
+    initial = RENDER_PROVIDER_XIAOYANG
+    bot_doc = db.collection("bots").document(BOT_NAME).get()
+    if bot_doc.exists:
+        initial = _render_provider_from_bot_data(bot_doc.to_dict() or {})
+    else:
+        legacy = db.collection("settings").document("render").get()
+        if legacy.exists:
+            initial = _normalize_render_provider(
+                (legacy.to_dict() or {}).get("activeProvider")
+            )
+    _apply_render_provider(initial)
     print(f"🎬 Render provider (đơn mới): {initial}")
-    db.collection("settings").document("render").on_snapshot(on_render_settings)
 
 
 def _http_create_job(model_id, char_path, vid_path):
@@ -664,16 +675,20 @@ def on_bot_config_snapshot(keys, changes, read_time):
     if not changes:
         return
     enabled = False
+    data = {}
     for change in changes:
         doc = change.document
         if getattr(doc, 'exists', False):
-            enabled = bool((doc.to_dict() or {}).get('enabled', False))
+            data = doc.to_dict() or {}
+            enabled = bool(data.get('enabled', False))
         break
     prev = is_bot_enabled()
     set_bot_enabled(enabled)
     if enabled != prev:
         status = "🟢 BẬT — bot đang xử lý đơn" if enabled else "🔴 TẮT — bot không làm gì"
         print(f"\n[{BOT_NAME}] Admin đổi trạng thái: {status}\n")
+    if data:
+        _apply_render_provider(_render_provider_from_bot_data(data), source="admin")
 
 def start_bot_control_listener():
     ensure_bot_registered()

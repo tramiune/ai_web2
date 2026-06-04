@@ -49,6 +49,18 @@ export const ADMIN_EMAILS = ["traderfinn0312@gmail.com", "dinhhoangvan.hh@gmail.
  *       allow create: if request.auth != null;
  *       allow update: if isAdmin();
  *     }
+ *
+ *     // Bots (bật/tắt bot + engine render — Admin UI ghi activeRenderProvider)
+ *     match /bots/{botId} {
+ *       allow read: if request.auth != null && isAdmin();
+ *       allow write: if isAdmin();
+ *     }
+ *
+ *     // (Tuỳ chọn) settings/render — UI hiện dùng bots/nhaycloud_vps_bot thay vì doc này
+ *     match /settings/{docId} {
+ *       allow read: if request.auth != null && isAdmin();
+ *       allow write: if isAdmin();
+ *     }
  *   }
  * }
  */
