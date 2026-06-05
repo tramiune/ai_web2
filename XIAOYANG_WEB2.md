@@ -1,10 +1,10 @@
-# XiaoYang trên ai_web2 — Web session (không API key)
+# XiaoYang trên ai_web2 (nhánh `feat/pure-http-aidancing`)
 
 ## Admin
 
 **Admin → tab Bots → Engine render**
 
-- `Aidancing` / `XiaoYang` — ghi Firestore `bots/{name}.activeRenderProvider`
+- `Aidancing` / `XiaoYang` — ghi Firestore `settings/render.activeProvider`
 - Đơn **processing** giữ `renderProvider` đã gắn lúc nạp
 - Đơn **pending** mới dùng engine đang chọn
 
@@ -12,31 +12,28 @@
 
 ```env
 BOT_MODE=api
-XIAOYANG_EMAIL=motionaistudio@gmail.com
-XIAOYANG_PASSWORD=...
-XIAOYANG_ENHANCE_4K=1
+XIAOYANG_API_KEY=xy_...
+XIAOYANG_DIRECT_WORKER_URL=https://xiaoyang-direct-media.traderfinn0312.workers.dev
 XIAOYANG_OPTION_KEY=default
-XIAOYANG_MOTION_ORIENTATION=video
 BOT_MIN_RENDER_SEC=300
 ```
 
-Cookie session lưu tại `xiaoyang_session.json` (tự login lại khi hết hạn).
-
-**Modal theo gói web (tự động):**
+**Modal theo gói web (tự động, không cần đổi tay mỗi đơn):**
 
 | Web | `modelId` | XiaoYang |
 |-----|-----------|----------|
-| Model thường (Fast) | `124` / `125` | `motion_v26` + HD 2K (~75 CR) |
-| Model Turbo 2K | `117` | `motion_v30` + HD 2K |
+| Model thường (Fast) | `124` / `125` | `motion_v26` (~72 CR) |
+| Model Turbo 2K | `117` | `motion_v30` (~206 CR) |
 
-## Luồng XiaoYang Web
+`XIAOYANG_MODAL_KEY` trong `.env` chỉ là fallback khi `modelId` lạ.
 
-1. `pending` → tải ảnh/video từ đơn → upload `/api/upload` → `POST /api/tasks`
-2. `processing` + `xiaoyangTaskId` — poll sau `BOT_MIN_RENDER_SEC`
-3. Poll `QUEUED` / `PROCESSING` → `SUCCESS` → tải `/api/tasks/{id}/file` → R2 → `completed`
-4. `FAIL` → hoàn coin + Telegram
+## Luồng XiaoYang
 
-Không cần Chrome, không cần `XIAOYANG_API_KEY`, không cần direct worker mirror.
+1. `pending` → mirror Workers → direct URL → `POST /api/v1/tasks`
+2. `processing` + `xiaoyangTaskId` — **không poll** trước `BOT_MIN_RENDER_SEC` (giống Aidancing)
+3. Poll `QUEUED` / `PENDING` / `PROCESSING` → `SUCCESS` → tải → R2 → `completed`
+4. `try_delete_task` sau khi trả hàng (nếu API hỗ trợ DELETE)
+5. `FAIL` → hoàn coin + Telegram
 
 ## Chạy bot
 

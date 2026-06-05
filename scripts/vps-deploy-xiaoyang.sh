@@ -25,22 +25,18 @@ ensure_env() {
   fi
 }
 
-echo "==> kiểm tra .env XiaoYang Web"
+echo "==> kiểm tra .env XiaoYang"
+ensure_env "XIAOYANG_DIRECT_WORKER_URL" "https://xiaoyang-direct-media.traderfinn0312.workers.dev"
 if grep -q "^XIAOYANG_MODAL_KEY=" "$ENV_FILE" 2>/dev/null; then
-  sed -i 's/^XIAOYANG_MODAL_KEY=.*/XIAOYANG_MODAL_KEY=motion_v26/' "$ENV_FILE" 2>/dev/null || \
-    sed -i '' 's/^XIAOYANG_MODAL_KEY=.*/XIAOYANG_MODAL_KEY=motion_v26/' "$ENV_FILE"
+  sed -i 's/^XIAOYANG_MODAL_KEY=.*/XIAOYANG_MODAL_KEY=motion_v26/' "$ENV_FILE"
   echo "  cập nhật XIAOYANG_MODAL_KEY=motion_v26 (fallback; turbo dùng motion_v30 theo modelId)"
 else
   ensure_env "XIAOYANG_MODAL_KEY" "motion_v26"
 fi
 ensure_env "XIAOYANG_OPTION_KEY" "default"
 ensure_env "XIAOYANG_MOTION_ORIENTATION" "video"
-ensure_env "XIAOYANG_ENHANCE_4K" "1"
-if ! grep -q "^XIAOYANG_EMAIL=" "$ENV_FILE" 2>/dev/null; then
-  echo "  !! Thiếu XIAOYANG_EMAIL — thêm tay vào .env rồi chạy lại"
-fi
-if ! grep -q "^XIAOYANG_PASSWORD=" "$ENV_FILE" 2>/dev/null; then
-  echo "  !! Thiếu XIAOYANG_PASSWORD — thêm tay vào .env rồi chạy lại"
+if ! grep -q "^XIAOYANG_API_KEY=" "$ENV_FILE" 2>/dev/null; then
+  echo "  !! Thiếu XIAOYANG_API_KEY — thêm tay vào .env rồi chạy lại"
 fi
 if ! grep -q "^BOT_MIN_RENDER_SEC=" "$ENV_FILE" 2>/dev/null; then
   ensure_env "BOT_MIN_RENDER_SEC" "300"
