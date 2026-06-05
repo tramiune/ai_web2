@@ -232,24 +232,18 @@ function resolvePromoCost(orders, baseCost, userData = null) {
     };
 }
 
-/** Server-side trong Firestore transaction — chống multi-tab / cache cũ. */
-async function readPromoCountsInTransaction(transaction, uid, userData) {
-    const { db, query, collection, where } = window.firebase;
+/** Trong Firestore transaction — dùng user doc + cache đơn (transaction.get chỉ nhận doc ref, không query). */
+function readPromoCountsInTransaction(_transaction, uid, userData) {
     const today = getVnDateString();
     let totalCount = Number(userData.promoTotalCount);
     let todayCount = 0;
     let bootstrapped = false;
 
     if (!Number.isFinite(totalCount)) {
-        totalCount = 0;
-        const q = query(collection(db, "orders"), where("userId", "==", uid));
-        const snap = await transaction.get(q);
-        snap.forEach((d) => {
-            const o = d.data();
-            if (o.dailyPromo !== true) return;
-            totalCount += 1;
-            if (o.promoDate === today) todayCount += 1;
-        });
+        const cached = (FB_CACHE.myOrders || []).filter((o) => o.userId === uid);
+        const promoOrders = cached.filter((o) => o.dailyPromo === true);
+        totalCount = promoOrders.length;
+        todayCount = promoOrders.filter((o) => o.promoDate === today).length;
         bootstrapped = true;
     } else {
         const lastDate = userData.promoLastDate || '';
@@ -3021,7 +3015,7 @@ async function setupEventListeners() {
                     if (modelIdOverride) model.modelId = modelIdOverride;
 
                     const userData = userDoc.data() || {};
-                    const promoCounts = await readPromoCountsInTransaction(
+                    const promoCounts = readPromoCountsInTransaction(
                         transaction, currentUser.uid, userData
                     );
                     const canUsePromo = promoCounts.totalCount < DAILY_PROMO_MAX_TOTAL
@@ -3086,7 +3080,7 @@ async function setupEventListeners() {
                                 if (modelIdOverride) orderModel.modelId = modelIdOverride;
 
                                 const userData = userDoc.data() || {};
-                                const promoCounts = await readPromoCountsInTransaction(
+                                const promoCounts = readPromoCountsInTransaction(
                                     transaction, currentUser.uid, userData
                                 );
                                 const canUsePromo = promoCounts.totalCount < DAILY_PROMO_MAX_TOTAL
