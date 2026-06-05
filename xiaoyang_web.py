@@ -30,16 +30,21 @@ class XiaoyangAuthError(XiaoyangWebError):
     pass
 
 
-def session_file_for_bot(bot_name: str) -> Path:
-    safe = re.sub(r"[^a-z0-9_-]", "_", (bot_name or "default").lower())
+def session_file_for_account(account_id: str) -> Path:
+    safe = re.sub(r"[^a-z0-9_-]", "_", (account_id or "default").lower())
     return Path(__file__).resolve().parent / f"xiaoyang_session_{safe}.json"
 
 
+# Giữ tên cũ cho code gọi theo bot name
+def session_file_for_bot(bot_name: str) -> Path:
+    return session_file_for_account(bot_name)
+
+
 class XiaoyangWebClient:
-    def __init__(self, bot_name: str = "default", session: requests.Session | None = None):
+    def __init__(self, account_id: str = "default", session: requests.Session | None = None):
         load_project_env()
-        self.bot_name = bot_name
-        self.session_file = session_file_for_bot(bot_name)
+        self.account_id = account_id
+        self.session_file = session_file_for_account(account_id)
         self.session = session or requests.Session()
         self.session.headers.update(
             {

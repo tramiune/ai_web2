@@ -8,7 +8,21 @@
 - Đơn **processing** giữ `renderProvider` đã gắn lúc nạp
 - Đơn **pending** mới dùng engine đang chọn
 
-## Bot VPS `.env`
+## Bot VPS `.env` (nhaycloud — web session)
+
+```env
+BOT_MODE=http
+XIAOYANG_ACCOUNTS=motionaistudio@gmail.com:pass,motionaistudio1@gmail.com:pass
+XIAOYANG_MAX_CONCURRENT=4
+XIAOYANG_ENHANCE_4K=1
+BOT_MIN_RENDER_SEC=300
+```
+
+- Mỗi nick XiaoYang tối đa **4 đơn `processing`** cùng lúc
+- Hết slot hoặc tạo task fail → **fallback Aidancing** (đơn vẫn `pending` → `processing` qua aidancing)
+- Session cookie lưu theo nick: `xiaoyang_session_motionaistudio_gmail_com.json`
+
+## Bot VPS `.env` (motionai/app — API v1)
 
 ```env
 BOT_MODE=api

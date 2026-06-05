@@ -77,8 +77,13 @@ _processing_cache_lock = threading.Lock()
 _xy_http_client = None
 _xy_http_client_lock = threading.Lock()
 NHAYCLOUD_XY_BOT = "nhaycloud_vps_bot"
+XIAOYANG_MAX_CONCURRENT_PER_ACCOUNT = int(get_env("XIAOYANG_MAX_CONCURRENT", "4"))
 _xy_web_clients = {}
 _xy_web_clients_lock = threading.Lock()
+_xy_inflight = {}
+_xy_inflight_lock = threading.Lock()
+_xy_accounts_cache = None
+_xy_accounts_cache_lock = threading.Lock()
 
 
 def _pop_processing_cache(order_id):
@@ -222,27 +227,142 @@ def _reset_xy_http_client():
         _xy_http_client = None
 
 
-def _get_xy_web_client(bot_name=None):
-    name = (bot_name or BOT_NAME or NHAYCLOUD_XY_BOT).lower()
-    with _xy_web_clients_lock:
-        if name not in _xy_web_clients:
-            _xy_web_clients[name] = XiaoyangWebClient(bot_name=name)
-        return _xy_web_clients[name]
+def _xiaoyang_account_id(email: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", (email or "").strip().lower()).strip("_") or "default"
 
 
-def _reset_xy_web_client(bot_name=None):
+def _load_xiaoyang_accounts():
+    """Danh sách nick XiaoYang web: [{id, email, password}, ...]."""
+    global _xy_accounts_cache
+    with _xy_accounts_cache_lock:
+        if _xy_accounts_cache is not None:
+            return _xy_accounts_cache
+        accounts = []
+        raw = (get_env("XIAOYANG_ACCOUNTS") or "").strip()
+        if raw:
+            if raw.startswith("["):
+                import json as _json
+                try:
+                    for item in _json.loads(raw):
+                        email = (item.get("email") or "").strip()
+                        password = item.get("password") or ""
+                        if email and password:
+                            accounts.append({
+                                "id": _xiaoyang_account_id(email),
+                                "email": email,
+                                "password": password,
+                            })
+                except Exception as e:
+                    print(f"⚠️ XIAOYANG_ACCOUNTS JSON lỗi: {e}")
+            else:
+                for part in raw.split(","):
+                    part = part.strip()
+                    if ":" not in part:
+                        continue
+                    email, password = part.split(":", 1)
+                    email, password = email.strip(), password.strip()
+                    if email and password:
+                        accounts.append({
+                            "id": _xiaoyang_account_id(email),
+                            "email": email,
+                            "password": password,
+                        })
+        if not accounts:
+            email = (get_env("XIAOYANG_EMAIL") or "").strip()
+            password = get_env("XIAOYANG_PASSWORD") or ""
+            if email and password:
+                accounts.append({
+                    "id": _xiaoyang_account_id(email),
+                    "email": email,
+                    "password": password,
+                })
+        _xy_accounts_cache = accounts
+        return accounts
+
+
+def _xy_inflight_inc(account_id: str):
+    with _xy_inflight_lock:
+        _xy_inflight[account_id] = _xy_inflight.get(account_id, 0) + 1
+
+
+def _xy_inflight_dec(account_id: str):
+    with _xy_inflight_lock:
+        n = _xy_inflight.get(account_id, 0) - 1
+        if n <= 0:
+            _xy_inflight.pop(account_id, None)
+        else:
+            _xy_inflight[account_id] = n
+
+
+def _count_xy_processing_for_account(account_id: str) -> int:
+    cache_count = 0
+    with _processing_cache_lock:
+        for doc in _processing_cache.values():
+            d = doc.to_dict() or {}
+            if d.get("status") == "processing" and d.get("xiaoyangAccount") == account_id:
+                cache_count += 1
+    try:
+        q = db.collection("orders").where(
+            filter=FieldFilter("status", "==", "processing")
+        ).where(
+            filter=FieldFilter("xiaoyangAccount", "==", account_id)
+        )
+        db_count = sum(1 for _ in q.stream())
+        return max(cache_count, db_count)
+    except Exception as e:
+        print(f"⚠️ Đếm đơn XiaoYang nick {account_id} (Firestore): {e} — dùng cache={cache_count}")
+        return cache_count
+
+
+def _xy_active_count(account_id: str) -> int:
+    with _xy_inflight_lock:
+        inflight = _xy_inflight.get(account_id, 0)
+    return _count_xy_processing_for_account(account_id) + inflight
+
+
+def _pick_xiaoyang_account():
+    """Chọn nick còn slot (< XIAOYANG_MAX_CONCURRENT_PER_ACCOUNT đơn processing)."""
+    accounts = _load_xiaoyang_accounts()
+    if not accounts:
+        return None
+    best = None
+    best_count = XIAOYANG_MAX_CONCURRENT_PER_ACCOUNT
+    for acc in accounts:
+        c = _xy_active_count(acc["id"])
+        if c < XIAOYANG_MAX_CONCURRENT_PER_ACCOUNT and c < best_count:
+            best = acc
+            best_count = c
+    return best
+
+
+def _xiaoyang_account_lookup(account_id: str):
+    for acc in _load_xiaoyang_accounts():
+        if acc["id"] == account_id:
+            return acc
+    return None
+
+
+def _get_xy_web_client(account_id=None):
+    key = (account_id or BOT_NAME or NHAYCLOUD_XY_BOT).lower()
     with _xy_web_clients_lock:
-        if bot_name:
-            _xy_web_clients.pop(bot_name.lower(), None)
+        if key not in _xy_web_clients:
+            _xy_web_clients[key] = XiaoyangWebClient(account_id=key)
+        return _xy_web_clients[key]
+
+
+def _reset_xy_web_client(account_id=None):
+    with _xy_web_clients_lock:
+        if account_id:
+            _xy_web_clients.pop(account_id.lower(), None)
         else:
             _xy_web_clients.clear()
 
 
-def _ensure_xy_web_session(client: XiaoyangWebClient):
+def _ensure_xy_web_session(client: XiaoyangWebClient, email=None, password=None):
     try:
         return client.me()
     except XiaoyangWebAuthError:
-        client.login()
+        client.login(email=email, password=password)
         return client.me()
 
 
@@ -373,8 +493,13 @@ def _http_poll_xiaoyang_orders(orders_to_check):
         print(f"🧐 XiaoYang {label} — task {task_id} (đơn {doc.id})...")
         try:
             if web_mode:
-                api = _get_xy_web_client(NHAYCLOUD_XY_BOT)
-                _ensure_xy_web_session(api)
+                account_id = (order_data.get("xiaoyangAccount") or NHAYCLOUD_XY_BOT).strip()
+                acc = _xiaoyang_account_lookup(account_id)
+                api = _get_xy_web_client(account_id)
+                if acc:
+                    _ensure_xy_web_session(api, acc["email"], acc["password"])
+                else:
+                    _ensure_xy_web_session(api)
                 t = api.get_task(task_id)
             else:
                 api = _get_xy_http_client()
@@ -383,7 +508,8 @@ def _http_poll_xiaoyang_orders(orders_to_check):
             print(f"❌ Poll XiaoYang {task_id}: {e}")
             if web_mode:
                 if isinstance(e, XiaoyangWebAuthError):
-                    _reset_xy_web_client()
+                    account_id = (order_data.get("xiaoyangAccount") or "").strip()
+                    _reset_xy_web_client(account_id or None)
             elif "401" in str(e) or "403" in str(e):
                 _reset_xy_http_client()
             continue
@@ -1162,7 +1288,15 @@ def check_finished_orders_api():
             except Exception as e:
                 print(f"❌ Lỗi monitor XiaoYang HTTP: {e}")
 
-def _mark_order_processing(doc_ref, job_id, *, provider=RENDER_PROVIDER_AIDANCING, xiaoyang_mode=None):
+def _mark_order_processing(
+    doc_ref,
+    job_id,
+    *,
+    provider=RENDER_PROVIDER_AIDANCING,
+    xiaoyang_mode=None,
+    xiaoyang_account=None,
+    xiaoyang_account_email=None,
+):
     """Chỉ chuyển processing sau khi engine render đã nhận job."""
     payload = {
         "status": "processing",
@@ -1174,6 +1308,10 @@ def _mark_order_processing(doc_ref, job_id, *, provider=RENDER_PROVIDER_AIDANCIN
         payload["xiaoyangTaskId"] = str(job_id)
         if xiaoyang_mode:
             payload["xiaoyangSubmitMode"] = xiaoyang_mode
+        if xiaoyang_account:
+            payload["xiaoyangAccount"] = str(xiaoyang_account)
+        if xiaoyang_account_email:
+            payload["xiaoyangAccountEmail"] = str(xiaoyang_account_email)
     else:
         payload["aidancingJobId"] = str(job_id)
     doc_ref.update(payload)
@@ -1182,36 +1320,56 @@ def _mark_order_processing(doc_ref, job_id, *, provider=RENDER_PROVIDER_AIDANCIN
 def submit_order(order_id):
     """Nạp đơn theo renderProvider đang chọn (Admin). Đơn processing giữ engine cũ."""
     provider = get_active_render_provider()
-    if provider == RENDER_PROVIDER_XIAOYANG:
-        submit_to_xiaoyang(order_id)
-    else:
+    if provider != RENDER_PROVIDER_XIAOYANG:
         submit_to_aidancing(order_id)
+        return
+
+    account = _pick_xiaoyang_account()
+    if not account:
+        print(
+            f"📊 XiaoYang đầy slot ({XIAOYANG_MAX_CONCURRENT_PER_ACCOUNT} đơn/nick) "
+            f"→ chuyển Aidancing cho {order_id}"
+        )
+        submit_to_aidancing(order_id, fallback_reason="xiaoyang_queue_full")
+        return
+
+    if submit_to_xiaoyang(order_id, account):
+        return
+
+    print(f"⚠️ XiaoYang thất bại {order_id} → chuyển Aidancing")
+    submit_to_aidancing(order_id, fallback_reason="xiaoyang_fail")
 
 
-def submit_to_xiaoyang(order_id):
+def submit_to_xiaoyang(order_id, account):
     if not is_bot_enabled():
         print(f"⏸️ [{BOT_NAME}] Bot TẮT — bỏ qua nạp đơn {order_id}")
-        return
+        return False
     if _pending_submit_backoff_active(order_id):
-        return
+        return False
     with _submitting_orders_lock:
         if order_id in _submitting_orders:
             print(f"⏭️ [{BOT_NAME}] Đơn {order_id} đang nạp — bỏ qua trùng lặp")
-            return
+            return False
         _submitting_orders.add(order_id)
+
+    account_id = account["id"]
+    account_email = account.get("email", "")
+    _xy_inflight_inc(account_id)
+    success = False
     try:
         with browser_lock:
             doc_ref = db.collection("orders").document(order_id)
             doc = doc_ref.get()
             if not doc.exists:
-                return
+                return False
             data = doc.to_dict() or {}
             if data.get("status") != "pending":
-                return
+                return False
 
             xy_web = _use_xiaoyang_web_session()
             mode_label = "XiaoYang Web" if xy_web else "XiaoYang API"
-            print(f"\n⚡ [NẠP ĐƠN / {mode_label}] {order_id}...")
+            nick_label = account_email or account_id
+            print(f"\n⚡ [NẠP ĐƠN / {mode_label}] {order_id} — nick {nick_label}...")
             img_url = (data.get("characterImageLink") or "").strip()
             vid_url = (data.get("referenceVideoLink") or "").strip()
             if not img_url or not vid_url:
@@ -1223,7 +1381,7 @@ def submit_to_xiaoyang(order_id):
                     "Thiếu ảnh hoặc video tham chiếu, hệ thống đã hoàn lại coin.",
                     "submit xiaoyang",
                 )
-                return
+                return False
 
             char_path = None
             vid_path = None
@@ -1235,11 +1393,14 @@ def submit_to_xiaoyang(order_id):
                 tier = "Turbo/v3.0" if modal == XIAOYANG_MODAL_TURBO else "Thường/v2.6"
 
                 if xy_web:
-                    api = _get_xy_web_client()
-                    _ensure_xy_web_session(api)
+                    api = _get_xy_web_client(account_id)
+                    _ensure_xy_web_session(api, account_email, account.get("password"))
                     enhance_4k = _xiaoyang_enhance_4k()
                     hd = " + HD 2K" if enhance_4k else ""
-                    print(f"🚀 [XiaoYang Web] {tier}{hd} — modelId={data.get('modelId')} → {modal}/{option}...")
+                    print(
+                        f"🚀 [XiaoYang Web/{nick_label}] {tier}{hd} — "
+                        f"modelId={data.get('modelId')} → {modal}/{option}..."
+                    )
                     for attempt in range(1, 3):
                         if attempt > 1:
                             print(f"🔄 Thử tải file lần {attempt}...")
@@ -1288,57 +1449,54 @@ def submit_to_xiaoyang(order_id):
                 task_id = resp.get("task_id")
                 if not task_id:
                     raise XiaoyangApiError(f"Không có task_id: {resp}")
-                print(f"🆔 [XiaoYang] task: {task_id} ({resp.get('status')})")
+                print(f"🆔 [XiaoYang/{nick_label}] task: {task_id} ({resp.get('status')})")
                 _mark_order_processing(
-                    doc_ref, task_id, provider=RENDER_PROVIDER_XIAOYANG, xiaoyang_mode=submit_mode
+                    doc_ref,
+                    task_id,
+                    provider=RENDER_PROVIDER_XIAOYANG,
+                    xiaoyang_mode=submit_mode,
+                    xiaoyang_account=account_id,
+                    xiaoyang_account_email=account_email,
                 )
                 _session_error_backoff.pop(order_id, None)
-                print(f"✅ Đơn {order_id} → processing ({mode_label})")
+                print(f"✅ Đơn {order_id} → processing ({mode_label}, {nick_label})")
                 try:
                     short_id = order_id[-6:].upper()
                     send_telegram_message(
                         f"⚙️ <b>ĐƠN HÀNG ĐANG XỬ LÝ</b> (XiaoYang)\n\n"
                         f"🆔 Mã đơn: #{short_id}\n"
+                        f"📧 Nick: {nick_label}\n"
                         f"🤖 Task: <code>{task_id}</code>\n"
                         f"⏳ Poll sau {MIN_RENDER_SEC // 60} phút..."
                     )
                 except Exception:
                     pass
-            except requests.RequestException as e:
-                print(f"⚠️ Lỗi mạng/SSL khi nạp XiaoYang {order_id}: {e}")
-                apply_bot_error_update(doc_ref, order_id, data, str(e), "upload xiaoyang")
-                print(f"⏳ Giữ pending — thử lại sau {SESSION_ERROR_BACKOFF_SEC // 60} phút")
+                success = True
             except (
+                requests.RequestException,
                 XiaoyangApiAuthError, XiaoyangApiError, XiaoyangWebAuthError, XiaoyangWebError,
                 DirectMediaError, MediaValidationError, ValueError,
             ) as e:
-                print(f"❌ Nạp XiaoYang thất bại {order_id}: {e}")
-                _session_error_backoff[order_id] = time.time() + SESSION_ERROR_BACKOFF_SEC
+                print(f"❌ Nạp XiaoYang thất bại {order_id} ({nick_label}): {e}")
                 if isinstance(e, XiaoyangApiAuthError):
                     _reset_xy_http_client()
                 if isinstance(e, XiaoyangWebAuthError):
-                    _reset_xy_web_client()
-                user_note = USER_NOTE_FILES_INVALID if isinstance(e, MediaValidationError) else USER_NOTE_SUBMIT_FAILED
-                if "E_SUBJECT_NOT_FOUND" in str(e):
-                    user_note = USER_NOTE_FILES_INVALID
-                _fail_order_processing(
-                    doc,
-                    data,
-                    str(e),
-                    user_note,
-                    "submit xiaoyang",
-                )
+                    _reset_xy_web_client(account_id)
+                notify_internal_error_telegram(order_id, data, str(e), f"submit xiaoyang/{nick_label}")
+                success = False
             finally:
                 if char_path and os.path.exists(char_path):
                     os.remove(char_path)
                 if vid_path and os.path.exists(vid_path):
                     os.remove(vid_path)
     finally:
+        _xy_inflight_dec(account_id)
         with _submitting_orders_lock:
             _submitting_orders.discard(order_id)
+    return success
 
 
-def submit_to_aidancing(order_id):
+def submit_to_aidancing(order_id, fallback_reason=None):
     if not is_bot_enabled():
         print(f"⏸️ [{BOT_NAME}] Bot TẮT — bỏ qua nạp đơn {order_id}")
         return
@@ -1359,7 +1517,8 @@ def submit_to_aidancing(order_id):
             if data.get('status') != 'pending':
                 return
 
-            print(f"\n⚡ [NẠP ĐƠN] {order_id}... (giữ pending cho đến khi aidancing OK)")
+            fb = f" [fallback: {fallback_reason}]" if fallback_reason else ""
+            print(f"\n⚡ [NẠP ĐƠN / Aidancing]{fb} {order_id}...")
 
             char_path = None
             vid_path = None
@@ -1813,16 +1972,23 @@ def start_bot():
         except ValueError as e:
             print(f"⚠️  Chưa cấu hình cookie: {e}")
         if _use_xiaoyang_web_session():
-            try:
-                xy = _get_xy_web_client()
-                me = _ensure_xy_web_session(xy)
-                hd = "bật" if _xiaoyang_enhance_4k() else "tắt"
-                print(
-                    f"✅ XiaoYang Web [{BOT_NAME}] — {me.get('email', '?')} | "
-                    f"credits: {me.get('credits', '?')} | HD 2K: {hd}"
-                )
-            except Exception as e:
-                print(f"⚠️  XiaoYang Web: {e}")
+            accounts = _load_xiaoyang_accounts()
+            hd = "bật" if _xiaoyang_enhance_4k() else "tắt"
+            print(
+                f"👥 XiaoYang accounts: {len(accounts)} nick | "
+                f"max {XIAOYANG_MAX_CONCURRENT_PER_ACCOUNT} đơn/nick | HD 2K: {hd}"
+            )
+            for acc in accounts:
+                try:
+                    xy = _get_xy_web_client(acc["id"])
+                    me = _ensure_xy_web_session(xy, acc["email"], acc["password"])
+                    active = _xy_active_count(acc["id"])
+                    print(
+                        f"  ✅ {acc['email']} | credits: {me.get('credits', '?')} | "
+                        f"đang chạy: {active}/{XIAOYANG_MAX_CONCURRENT_PER_ACCOUNT}"
+                    )
+                except Exception as e:
+                    print(f"  ⚠️  {acc['email']}: {e}")
         else:
             try:
                 me = _get_xy_http_client().me()
