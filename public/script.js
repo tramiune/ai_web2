@@ -178,11 +178,7 @@ function getVnDateString(date = new Date()) {
     return new Intl.DateTimeFormat('en-CA', { timeZone: VN_TIMEZONE }).format(date);
 }
 
-function getDailyPromoStatus(orders = []) {
-    const today = getVnDateString();
-    const promoOrders = orders.filter((o) => o.dailyPromo === true);
-    const totalCount = promoOrders.length;
-    const todayCount = promoOrders.filter((o) => o.promoDate === today).length;
+function promoStatusFromCounts(today, todayCount, totalCount) {
     const remainingTotal = Math.max(0, DAILY_PROMO_MAX_TOTAL - totalCount);
     const canUsePromo = remainingTotal > 0 && todayCount < DAILY_PROMO_PER_DAY;
     return {
@@ -195,8 +191,36 @@ function getDailyPromoStatus(orders = []) {
     };
 }
 
-function resolvePromoCost(orders, baseCost) {
-    const promo = getDailyPromoStatus(orders);
+function getDailyPromoStatusFromOrders(orders = []) {
+    const today = getVnDateString();
+    const promoOrders = orders.filter((o) => o.dailyPromo === true);
+    const totalCount = promoOrders.length;
+    const todayCount = promoOrders.filter((o) => o.promoDate === today).length;
+    return promoStatusFromCounts(today, todayCount, totalCount);
+}
+
+function getDailyPromoStatusFromUser(userData = null) {
+    if (!userData || userData.promoTotalCount === undefined) return null;
+    const today = getVnDateString();
+    const totalCount = Number(userData.promoTotalCount) || 0;
+    const lastDate = userData.promoLastDate || '';
+    const todayCount = lastDate === today ? (Number(userData.promoTodayCount) || 0) : 0;
+    return promoStatusFromCounts(today, todayCount, totalCount);
+}
+
+/** UI: lấy max(đơn, user doc) để không hiển thị promo khi đã hết lượt thật. */
+function getDailyPromoStatus(orders = [], userData = null) {
+    const fromOrders = getDailyPromoStatusFromOrders(orders);
+    const fromUser = getDailyPromoStatusFromUser(userData);
+    if (!fromUser) return fromOrders;
+    const today = fromOrders.today;
+    const todayCount = Math.max(fromOrders.todayCount, fromUser.todayCount);
+    const totalCount = Math.max(fromOrders.totalCount, fromUser.totalCount);
+    return promoStatusFromCounts(today, todayCount, totalCount);
+}
+
+function resolvePromoCost(orders, baseCost, userData = null) {
+    const promo = getDailyPromoStatus(orders, userData);
     if (!promo.canUsePromo) {
         return { cost: baseCost, isPromo: false, remainingToday: 0, remainingTotal: promo.remainingTotal };
     }
@@ -206,6 +230,49 @@ function resolvePromoCost(orders, baseCost) {
         remainingToday: 1,
         remainingTotal: promo.remainingTotal - 1
     };
+}
+
+/** Server-side trong Firestore transaction — chống multi-tab / cache cũ. */
+async function readPromoCountsInTransaction(transaction, uid, userData) {
+    const { db, query, collection, where } = window.firebase;
+    const today = getVnDateString();
+    let totalCount = Number(userData.promoTotalCount);
+    let todayCount = 0;
+    let bootstrapped = false;
+
+    if (!Number.isFinite(totalCount)) {
+        totalCount = 0;
+        const q = query(collection(db, "orders"), where("userId", "==", uid));
+        const snap = await transaction.get(q);
+        snap.forEach((d) => {
+            const o = d.data();
+            if (o.dailyPromo !== true) return;
+            totalCount += 1;
+            if (o.promoDate === today) todayCount += 1;
+        });
+        bootstrapped = true;
+    } else {
+        const lastDate = userData.promoLastDate || '';
+        todayCount = lastDate === today ? (Number(userData.promoTodayCount) || 0) : 0;
+    }
+    return { today, totalCount, todayCount, bootstrapped };
+}
+
+function applyPromoUserDocUpdate(transaction, userRef, promoCounts, isDailyPromo, userData) {
+    const { serverTimestamp } = window.firebase;
+    const patch = { updatedAt: serverTimestamp() };
+    if (isDailyPromo) {
+        patch.promoTotalCount = promoCounts.totalCount + 1;
+        patch.promoLastDate = promoCounts.today;
+        patch.promoTodayCount = promoCounts.todayCount + 1;
+    } else if (promoCounts.bootstrapped && userData.promoTotalCount === undefined) {
+        patch.promoTotalCount = promoCounts.totalCount;
+        patch.promoLastDate = promoCounts.todayCount > 0 ? promoCounts.today : '';
+        patch.promoTodayCount = promoCounts.todayCount;
+    }
+    if (Object.keys(patch).length > 1) {
+        transaction.update(userRef, patch);
+    }
 }
 let initialCoinsBeforeTopup = 0; // Để theo dõi số dư trước khi nạp
 let starterTopupUsed = false; // Đã nạp gói starter_v2 (40k) — ẩn gói sau lần đầu
@@ -1337,6 +1404,7 @@ async function handleUserLoggedIn(user) {
     fbSub('userProfile', onSnapshot(userRef, (snapshot) => {
         if (snapshot.exists()) {
             const data = snapshot.data();
+            FB_CACHE.userProfile = data;
             const currentCoins = data.coins || 0;
 
             // [TỐI ƯU] KHÔNG còn log 'login' event ở đây nữa.
@@ -2177,7 +2245,7 @@ window.openOrderModal = () => {
 
 function updateFirstOrderUI() {
     const costEl = document.getElementById('submit-cost');
-    const promo = getDailyPromoStatus(FB_CACHE.myOrders || []);
+    const promo = getDailyPromoStatus(FB_CACHE.myOrders || [], FB_CACHE.userProfile);
     dailyPromoRemaining = promo.remainingToday;
 
     const modelGroupEl = document.getElementById('model-selection-group');
@@ -2860,14 +2928,18 @@ async function setupEventListeners() {
                     let model = { ...baseModel };
                     if (modelIdOverride) model.modelId = modelIdOverride;
 
-                    const promo = resolvePromoCost(cachedOrders, model.cost);
-                    model.cost = promo.cost;
-                    model.dailyPromo = promo.isPromo;
-                    if (promo.isPromo) {
-                        console.log(`🎁 Ưu đãi ngày: ${promo.remainingToday} lượt còn lại @ ${DAILY_PROMO_COST} coin`);
+                    const userData = userDoc.data() || {};
+                    const promoCounts = await readPromoCountsInTransaction(
+                        transaction, currentUser.uid, userData
+                    );
+                    const canUsePromo = promoCounts.totalCount < DAILY_PROMO_MAX_TOTAL
+                        && promoCounts.todayCount < DAILY_PROMO_PER_DAY;
+                    model.cost = canUsePromo ? DAILY_PROMO_COST : model.cost;
+                    model.dailyPromo = canUsePromo;
+                    if (canUsePromo) {
+                        console.log(`🎁 Ưu đãi ngày (tx): còn ${DAILY_PROMO_MAX_TOTAL - promoCounts.totalCount} lượt @ ${DAILY_PROMO_COST} coin`);
                     }
 
-                    const userData = userDoc.data() || {};
                     if ((userData.coins || 0) < model.cost) {
                         throw t('modals.insufficient_coins_title');
                     }
@@ -2921,10 +2993,14 @@ async function setupEventListeners() {
                                 let orderModel = { ...baseModel };
                                 if (modelIdOverride) orderModel.modelId = modelIdOverride;
 
-                                const promo = resolvePromoCost(cachedOrders, orderModel.cost);
-                                const finalCost = promo.cost;
-                                const isDailyPromo = promo.isPromo;
                                 const userData = userDoc.data() || {};
+                                const promoCounts = await readPromoCountsInTransaction(
+                                    transaction, currentUser.uid, userData
+                                );
+                                const canUsePromo = promoCounts.totalCount < DAILY_PROMO_MAX_TOTAL
+                                    && promoCounts.todayCount < DAILY_PROMO_PER_DAY;
+                                const finalCost = canUsePromo ? DAILY_PROMO_COST : orderModel.cost;
+                                const isDailyPromo = canUsePromo;
                                 const currentCoins = userData.coins || 0;
 
                                 if (currentCoins < finalCost) {
@@ -2938,6 +3014,9 @@ async function setupEventListeners() {
                                 if (finalCost > 0) {
                                     transaction.update(userRef, { coins: coinsAfter });
                                 }
+                                applyPromoUserDocUpdate(
+                                    transaction, userRef, promoCounts, isDailyPromo, userData
+                                );
 
                                 const orderPayload = {
                                     userId: currentUser.uid,
@@ -3117,7 +3196,7 @@ function loadMyOrders() {
         FB_CACHE.myOrders = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
 
         orderCount = snapshot.size;
-        const promo = getDailyPromoStatus(FB_CACHE.myOrders);
+        const promo = getDailyPromoStatus(FB_CACHE.myOrders, FB_CACHE.userProfile);
         dailyPromoRemaining = promo.remainingToday;
         console.log("🔍 loadMyOrders: orderCount =", orderCount, "dailyPromo remaining =", dailyPromoRemaining);
         updateFirstOrderUI();
