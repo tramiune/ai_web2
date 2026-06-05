@@ -525,7 +525,11 @@ def _pending_order_worker():
             if _pending_order_queue:
                 order_id = _pending_order_queue.pop(0)
         if order_id:
-            submit_order(order_id)
+            try:
+                submit_order(order_id)
+            except Exception as e:
+                print(f"❌ Lỗi nạp đơn {order_id}: {e}")
+                _session_error_backoff[order_id] = time.time() + SESSION_ERROR_BACKOFF_SEC
         else:
             time.sleep(0.5)
 
@@ -1300,6 +1304,10 @@ def submit_to_xiaoyang(order_id):
                     )
                 except Exception:
                     pass
+            except requests.RequestException as e:
+                print(f"⚠️ Lỗi mạng/SSL khi nạp XiaoYang {order_id}: {e}")
+                apply_bot_error_update(doc_ref, order_id, data, str(e), "upload xiaoyang")
+                print(f"⏳ Giữ pending — thử lại sau {SESSION_ERROR_BACKOFF_SEC // 60} phút")
             except (
                 XiaoyangApiAuthError, XiaoyangApiError, XiaoyangWebAuthError, XiaoyangWebError,
                 DirectMediaError, MediaValidationError, ValueError,
@@ -1742,29 +1750,35 @@ def on_pending_orders_snapshot(keys, changes, read_time):
                 print(f"📋 Xếp hàng nạp đơn: {oid} (còn {len(_pending_order_queue)} trong queue)")
 
 
+def _enqueue_pending_rescan():
+    """Đưa đơn pending vào queue (khởi động bot hoặc retry sau lỗi mạng)."""
+    if not is_bot_enabled():
+        return
+    _ensure_pending_worker()
+    try:
+        docs = db.collection('orders').where(
+            filter=FieldFilter("status", "==", "pending")
+        ).limit(20).stream()
+        with _pending_queue_lock:
+            for doc in docs:
+                oid = doc.id
+                if _pending_submit_backoff_active(oid):
+                    continue
+                with _submitting_orders_lock:
+                    if oid in _submitting_orders:
+                        continue
+                if oid not in _pending_order_queue:
+                    _pending_order_queue.append(oid)
+                    print(f"🔄 Hàng đợi thử lại đơn pending: {oid}")
+    except Exception as e:
+        print(f"⚠️ rescan pending: {e}")
+
+
 def _rescan_pending_orders_loop():
     """Thử lại đơn pending sau khi session Aidancing được sửa (mỗi 5 phút)."""
     while True:
         time.sleep(SESSION_ERROR_BACKOFF_SEC)
-        if not is_bot_enabled():
-            continue
-        try:
-            docs = db.collection('orders').where(
-                filter=FieldFilter("status", "==", "pending")
-            ).limit(20).stream()
-            with _pending_queue_lock:
-                for doc in docs:
-                    oid = doc.id
-                    if _pending_submit_backoff_active(oid):
-                        continue
-                    with _submitting_orders_lock:
-                        if oid in _submitting_orders:
-                            continue
-                    if oid not in _pending_order_queue:
-                        _pending_order_queue.append(oid)
-                        print(f"🔄 Hàng đợi thử lại đơn pending: {oid}")
-        except Exception as e:
-            print(f"⚠️ rescan pending: {e}")
+        _enqueue_pending_rescan()
 
 def start_bot():
     global BOT_NAME
@@ -1835,6 +1849,7 @@ def start_bot():
     threading.Thread(target=_rescan_pending_orders_loop, daemon=True).start()
 
     db.collection('orders').where(filter=FieldFilter("status", "==", "pending")).on_snapshot(on_pending_orders_snapshot)
+    _enqueue_pending_rescan()
 
     print(f"🟢 [{BOT_NAME}] Đang trực — lắng nghe Firestore (bật/tắt từ Admin)...")
     while True:

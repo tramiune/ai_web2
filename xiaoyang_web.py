@@ -8,6 +8,7 @@ import json
 import mimetypes
 import os
 import re
+import time
 from pathlib import Path
 
 import requests
@@ -122,21 +123,40 @@ class XiaoyangWebClient:
         if not os.path.isfile(file_path):
             raise XiaoyangWebError(f"File không tồn tại: {file_path}")
         mime = mimetypes.guess_type(file_path)[0] or "application/octet-stream"
-        with open(file_path, "rb") as f:
-            r = self.session.post(
-                self._url("/api/upload"),
-                files={"file": (os.path.basename(file_path), f, mime)},
-                timeout=int(get_env("XIAOYANG_UPLOAD_TIMEOUT_SEC", "300")),
-            )
-        if r.status_code == 401:
-            raise XiaoyangAuthError("Session hết hạn khi upload")
-        body = r.json() if r.content else {}
-        if not r.ok:
-            raise XiaoyangWebError(f"Upload HTTP {r.status_code}: {body.get('detail', r.text[:200])}")
-        token = body.get("token")
-        if not token:
-            raise XiaoyangWebError(f"Upload không trả token: {body}")
-        return str(token)
+        name = os.path.basename(file_path)
+        timeout = int(get_env("XIAOYANG_UPLOAD_TIMEOUT_SEC", "300"))
+        retries = int(get_env("XIAOYANG_UPLOAD_RETRIES", "3"))
+        last_err = None
+        for attempt in range(1, retries + 1):
+            try:
+                with open(file_path, "rb") as f:
+                    payload = f.read()
+                r = self.session.post(
+                    self._url("/api/upload"),
+                    files={"file": (name, payload, mime)},
+                    headers={"Connection": "close"},
+                    timeout=timeout,
+                )
+                if r.status_code == 401:
+                    raise XiaoyangAuthError("Session hết hạn khi upload")
+                body = r.json() if r.content else {}
+                if not r.ok:
+                    raise XiaoyangWebError(
+                        f"Upload HTTP {r.status_code}: {body.get('detail', r.text[:200])}"
+                    )
+                token = body.get("token")
+                if not token:
+                    raise XiaoyangWebError(f"Upload không trả token: {body}")
+                return str(token)
+            except (requests.ConnectionError, requests.Timeout, requests.exceptions.SSLError) as e:
+                last_err = e
+                if attempt < retries:
+                    wait = min(8, attempt * 2)
+                    print(f"⚠️ Upload {name} lỗi SSL/mạng (lần {attempt}/{retries}), thử lại sau {wait}s...")
+                    time.sleep(wait)
+                    continue
+                raise
+        raise XiaoyangWebError(f"Upload thất bại: {last_err}")
 
     def create_motion_task(
         self,
