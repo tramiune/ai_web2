@@ -19,9 +19,7 @@ from project_env import get_env, load_project_env
 load_project_env()
 
 from aidancing_api import AidancingApiClient, SessionExpiredError
-from xiaoyang_api import XiaoyangApiClient, XiaoyangAuthError, XiaoyangApiError
-from xiaoyang_direct import DirectMediaError
-from xiaoyang_media import MediaValidationError
+from xiaoyang_web import XiaoyangWebClient, XiaoyangAuthError, XiaoyangWebError
 
 # --- CONFIGURATION ---
 cred = credentials.Certificate("serviceAccountKey.json")
@@ -73,8 +71,8 @@ _active_render_provider = RENDER_PROVIDER_XIAOYANG
 _active_render_provider_lock = threading.Lock()
 _processing_cache = {}
 _processing_cache_lock = threading.Lock()
-_xy_http_client = None
-_xy_http_client_lock = threading.Lock()
+_xy_web_client = None
+_xy_web_client_lock = threading.Lock()
 
 
 def _pop_processing_cache(order_id):
@@ -195,18 +193,30 @@ def _order_render_provider(order_data: dict) -> str:
     return RENDER_PROVIDER_AIDANCING
 
 
-def _get_xy_http_client():
-    global _xy_http_client
-    with _xy_http_client_lock:
-        if _xy_http_client is None:
-            _xy_http_client = XiaoyangApiClient()
-        return _xy_http_client
+def _xiaoyang_enhance_4k() -> bool:
+    return get_env("XIAOYANG_ENHANCE_4K", "1").strip().lower() not in ("0", "false", "no")
 
 
-def _reset_xy_http_client():
-    global _xy_http_client
-    with _xy_http_client_lock:
-        _xy_http_client = None
+def _get_xy_web_client():
+    global _xy_web_client
+    with _xy_web_client_lock:
+        if _xy_web_client is None:
+            _xy_web_client = XiaoyangWebClient()
+        return _xy_web_client
+
+
+def _reset_xy_web_client():
+    global _xy_web_client
+    with _xy_web_client_lock:
+        _xy_web_client = None
+
+
+def _ensure_xy_web_session(client: XiaoyangWebClient):
+    try:
+        return client.me()
+    except XiaoyangAuthError:
+        client.login()
+        return client.me()
 
 
 def _normalize_render_provider(value, default=RENDER_PROVIDER_XIAOYANG):
@@ -322,7 +332,14 @@ def _fail_order_processing(doc, order_data, err_detail, system_note, context: st
 
 
 def _http_poll_xiaoyang_orders(orders_to_check):
-    api = _get_xy_http_client()
+    api = _get_xy_web_client()
+    try:
+        _ensure_xy_web_session(api)
+    except (XiaoyangAuthError, XiaoyangWebError) as e:
+        print(f"❌ XiaoYang session: {e}")
+        _reset_xy_web_client()
+        return
+
     for doc in orders_to_check:
         task_id = str((doc.to_dict() or {}).get("xiaoyangTaskId") or "").strip()
         if not task_id:
@@ -330,22 +347,24 @@ def _http_poll_xiaoyang_orders(orders_to_check):
         print(f"🧐 XiaoYang — task {task_id} (đơn {doc.id})...")
         try:
             t = api.get_task(task_id)
-        except (XiaoyangAuthError, XiaoyangApiError) as e:
+        except (XiaoyangAuthError, XiaoyangWebError) as e:
             print(f"❌ Poll XiaoYang {task_id}: {e}")
-            if "401" in str(e) or "403" in str(e):
-                _reset_xy_http_client()
+            if isinstance(e, XiaoyangAuthError):
+                _reset_xy_web_client()
             continue
         st = (t.get("status") or "").upper()
         err = t.get("error_message")
-        print(f"   status={st}" + (f" — {err}" if err else ""))
+        stage = ""
+        if t.get("enhance_4k") and t.get("enhance_stage") == "enhancing" and st != "SUCCESS":
+            stage = " (HD 2K)"
+        print(f"   status={st}{stage}" + (f" — {err}" if err else ""))
         if st == "SUCCESS":
             if _skip_if_order_done(doc.id, "đã completed trên Firestore"):
                 continue
             print(f"🎉 XiaoYang task {task_id} HOÀN TẤT — tải video...")
             try:
-                local_vid = api.download_task(task_id, f"res_{doc.id}.mp4")
-                if _complete_order_with_video(doc, local_vid):
-                    api.try_delete_task(task_id)
+                local_vid = api.download_task_file(task_id, f"res_{doc.id}.mp4")
+                _complete_order_with_video(doc, local_vid)
             except Exception as e:
                 print(f"⚠️ Lỗi tải/hoàn đơn {doc.id}: {e}")
         elif st == "FAIL":
@@ -358,7 +377,6 @@ def _http_poll_xiaoyang_orders(orders_to_check):
                 USER_NOTE_ORDER_FAILED,
                 "render xiaoyang",
             )
-            api.try_delete_task(task_id)
         else:
             print(f"⏳ Task {task_id} vẫn {st} (QUEUED/PENDING/PROCESSING)")
 
@@ -1141,7 +1159,7 @@ def submit_to_xiaoyang(order_id):
             if data.get("status") != "pending":
                 return
 
-            print(f"\n⚡ [NẠP ĐƠN / XiaoYang] {order_id}...")
+            print(f"\n⚡ [NẠP ĐƠN / XiaoYang Web] {order_id}...")
             img_url = (data.get("characterImageLink") or "").strip()
             vid_url = (data.get("referenceVideoLink") or "").strip()
             if not img_url or not vid_url:
@@ -1155,37 +1173,55 @@ def submit_to_xiaoyang(order_id):
                 )
                 return
 
+            char_path = None
+            vid_path = None
             try:
-                api = _get_xy_http_client()
+                api = _get_xy_web_client()
+                _ensure_xy_web_session(api)
+
+                for attempt in range(1, 3):
+                    if attempt > 1:
+                        print(f"🔄 Thử tải file lần {attempt}...")
+                    char_path = download_file(img_url, f"char_{order_id}.png")
+                    vid_path = download_file(vid_url, f"vid_{order_id}.mp4")
+                    if char_path and vid_path:
+                        break
+                    time.sleep(2)
+
+                if not char_path or not vid_path:
+                    raise XiaoyangWebError("Không tải được ảnh/video từ link đơn hàng")
+
                 modal, option = _xiaoyang_modal_for_order(data)
                 prompt = (data.get("prompt") or get_env(
                     "XIAOYANG_PROMPT", "Follow the reference motion naturally"
                 )).strip()
-                from xiaoyang_direct import direct_worker_base
-
-                dw = direct_worker_base()
-                if dw:
-                    print(f"📎 Direct worker: {dw}")
+                enhance_4k = _xiaoyang_enhance_4k()
                 tier = "Turbo/v3.0" if modal == XIAOYANG_MODAL_TURBO else "Thường/v2.6"
+                hd = " + HD 2K" if enhance_4k else ""
                 print(
-                    f"🚀 [XiaoYang HTTP] {tier} — modelId={data.get('modelId')} "
-                    f"→ motion {modal}/{option}..."
+                    f"🚀 [XiaoYang Web] {tier}{hd} — modelId={data.get('modelId')} "
+                    f"→ {modal}/{option}..."
                 )
-                resp = api.create_task(
-                    modal,
-                    option,
-                    prompt,
-                    image_url=img_url,
-                    video_url=vid_url,
+                print("📤 Upload ảnh lên xiaoyang.online...")
+                image_token = api.upload_file(char_path)
+                print("📤 Upload video motion...")
+                video_token = api.upload_file(vid_path)
+                resp = api.create_motion_task(
+                    image_token=image_token,
+                    video_token=video_token,
+                    prompt=prompt,
+                    modal_key=modal,
+                    option_key=option,
                     motion_orientation=get_env("XIAOYANG_MOTION_ORIENTATION", "video"),
+                    enhance_4k=enhance_4k,
                 )
                 task_id = resp.get("task_id")
                 if not task_id:
-                    raise XiaoyangApiError(f"Không có task_id: {resp}")
-                print(f"🆔 [XiaoYang] task: {task_id} ({resp.get('status')})")
+                    raise XiaoyangWebError(f"Không có task_id: {resp}")
+                print(f"🆔 [XiaoYang] task: {task_id} ({resp.get('status')}) | credits: {resp.get('credits')}")
                 _mark_order_processing(doc_ref, task_id, provider=RENDER_PROVIDER_XIAOYANG)
                 _session_error_backoff.pop(order_id, None)
-                print(f"✅ Đơn {order_id} → processing (XiaoYang)")
+                print(f"✅ Đơn {order_id} → processing (XiaoYang Web)")
                 try:
                     short_id = order_id[-6:].upper()
                     send_telegram_message(
@@ -1196,12 +1232,14 @@ def submit_to_xiaoyang(order_id):
                     )
                 except Exception:
                     pass
-            except (XiaoyangAuthError, XiaoyangApiError, DirectMediaError, MediaValidationError, ValueError) as e:
+            except (XiaoyangAuthError, XiaoyangWebError, ValueError) as e:
                 print(f"❌ Nạp XiaoYang thất bại {order_id}: {e}")
                 _session_error_backoff[order_id] = time.time() + SESSION_ERROR_BACKOFF_SEC
                 if isinstance(e, XiaoyangAuthError):
-                    _reset_xy_http_client()
-                user_note = USER_NOTE_FILES_INVALID if isinstance(e, MediaValidationError) else USER_NOTE_SUBMIT_FAILED
+                    _reset_xy_web_client()
+                user_note = USER_NOTE_SUBMIT_FAILED
+                if "E_SUBJECT_NOT_FOUND" in str(e) or "không hợp lệ" in str(e).lower():
+                    user_note = USER_NOTE_FILES_INVALID
                 _fail_order_processing(
                     doc,
                     data,
@@ -1209,6 +1247,11 @@ def submit_to_xiaoyang(order_id):
                     user_note,
                     "submit xiaoyang",
                 )
+            finally:
+                if char_path and os.path.exists(char_path):
+                    os.remove(char_path)
+                if vid_path and os.path.exists(vid_path):
+                    os.remove(vid_path)
     finally:
         with _submitting_orders_lock:
             _submitting_orders.discard(order_id)
@@ -1664,7 +1707,7 @@ def start_bot():
         print("❌ Tên bot không hợp lệ. Dùng: python bot.py --name aidancing-vps1")
         sys.exit(1)
 
-    print(f"📡 Wallpaper BOT [{BOT_NAME}] (v3.9 xy+ad - mode={os.environ.get('BOT_MODE', 'browser')}) đang khởi động...")
+    print(f"📡 Wallpaper BOT [{BOT_NAME}] (v4.0 xy-web+ad - mode={os.environ.get('BOT_MODE', 'browser')}) đang khởi động...")
     cdp_url = os.environ.get("BOT_CDP_URL", "").strip()
     if cdp_url:
         if ensure_cdp_available(cdp_url):
@@ -1683,14 +1726,15 @@ def start_bot():
         except ValueError as e:
             print(f"⚠️  Chưa cấu hình cookie: {e}")
         try:
-            me = _get_xy_http_client().me()
-            print(f"✅ XiaoYang API — {me.get('email', '?')} | credits: {me.get('credits', '?')}")
-            from xiaoyang_direct import direct_worker_base
-
-            dw = direct_worker_base()
-            print(f"✅ XiaoYang direct worker: {dw or '(chưa cấu hình — Workers ?file= sẽ lỗi)'}")
+            xy = _get_xy_web_client()
+            me = _ensure_xy_web_session(xy)
+            hd = "bật" if _xiaoyang_enhance_4k() else "tắt"
+            print(
+                f"✅ XiaoYang Web — {me.get('email', '?')} | "
+                f"credits: {me.get('credits', '?')} | HD 2K: {hd}"
+            )
         except Exception as e:
-            print(f"⚠️  XiaoYang API: {e}")
+            print(f"⚠️  XiaoYang Web: {e}")
 
     def monitor_loop():
         while True:

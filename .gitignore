@@ -15,6 +15,7 @@ venv/
 
 # Bot Sensitive Data + runtime artifacts
 serviceAccountKey.json
+xiaoyang_session.json
 bot_chrome_profile/
 *.mp4
 *.png

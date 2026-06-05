@@ -1,10 +1,10 @@
-# XiaoYang trên ai_web2 (nhánh `feat/pure-http-aidancing`)
+# XiaoYang trên ai_web2 — Web session (không API key)
 
 ## Admin
 
 **Admin → tab Bots → Engine render**
 
-- `Aidancing` / `XiaoYang` — ghi Firestore `settings/render.activeProvider`
+- `Aidancing` / `XiaoYang` — ghi Firestore `bots/{name}.activeRenderProvider`
 - Đơn **processing** giữ `renderProvider` đã gắn lúc nạp
 - Đơn **pending** mới dùng engine đang chọn
 
@@ -12,28 +12,31 @@
 
 ```env
 BOT_MODE=api
-XIAOYANG_API_KEY=xy_...
-XIAOYANG_DIRECT_WORKER_URL=https://xiaoyang-direct-media.traderfinn0312.workers.dev
+XIAOYANG_EMAIL=motionaistudio@gmail.com
+XIAOYANG_PASSWORD=...
+XIAOYANG_ENHANCE_4K=1
 XIAOYANG_OPTION_KEY=default
+XIAOYANG_MOTION_ORIENTATION=video
 BOT_MIN_RENDER_SEC=300
 ```
 
-**Modal theo gói web (tự động, không cần đổi tay mỗi đơn):**
+Cookie session lưu tại `xiaoyang_session.json` (tự login lại khi hết hạn).
+
+**Modal theo gói web (tự động):**
 
 | Web | `modelId` | XiaoYang |
 |-----|-----------|----------|
-| Model thường (Fast) | `124` / `125` | `motion_v26` (~72 CR) |
-| Model Turbo 2K | `117` | `motion_v30` (~206 CR) |
+| Model thường (Fast) | `124` / `125` | `motion_v26` + HD 2K (~75 CR) |
+| Model Turbo 2K | `117` | `motion_v30` + HD 2K |
 
-`XIAOYANG_MODAL_KEY` trong `.env` chỉ là fallback khi `modelId` lạ.
+## Luồng XiaoYang Web
 
-## Luồng XiaoYang
+1. `pending` → tải ảnh/video từ đơn → upload `/api/upload` → `POST /api/tasks`
+2. `processing` + `xiaoyangTaskId` — poll sau `BOT_MIN_RENDER_SEC`
+3. Poll `QUEUED` / `PROCESSING` → `SUCCESS` → tải `/api/tasks/{id}/file` → R2 → `completed`
+4. `FAIL` → hoàn coin + Telegram
 
-1. `pending` → mirror Workers → direct URL → `POST /api/v1/tasks`
-2. `processing` + `xiaoyangTaskId` — **không poll** trước `BOT_MIN_RENDER_SEC` (giống Aidancing)
-3. Poll `QUEUED` / `PENDING` / `PROCESSING` → `SUCCESS` → tải → R2 → `completed`
-4. `try_delete_task` sau khi trả hàng (nếu API hỗ trợ DELETE)
-5. `FAIL` → hoàn coin + Telegram
+Không cần Chrome, không cần `XIAOYANG_API_KEY`, không cần direct worker mirror.
 
 ## Chạy bot
 
