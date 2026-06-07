@@ -22,8 +22,8 @@ function safeToDate(field) {
 
 // --- Data Constants ---
 const COIN_PACKAGES = [
-    { id: 'starter_v2', name: 'Starter',    coins: 20,   price: '80.000đ',   amount: 80000,   hasBonus: false, oneTime: true },
-    { id: 'creator',    name: 'Creator',    coins: 200,  price: '200.000đ',  amount: 200000, featured: true, hasBonus: true },
+    { id: 'starter_v2', name: 'Starter',    coins: 20,   price: '40.000đ',   amount: 40000,   hasBonus: false, oneTime: true },
+    { id: 'creator',    name: 'Creator',    coins: 100,  price: '100.000đ',  amount: 100000, featured: true, hasBonus: true },
     { id: 'studio',     name: 'Studio',     coins: 550,  price: '500.000đ',  amount: 500000,  hasBonus: true },
     { id: 'pro-studio', name: 'Enterprise', coins: 1100, price: '1.000.000đ', amount: 1000000, hasBonus: true }
 ];
@@ -269,16 +269,14 @@ function applyPromoUserDocUpdate(transaction, userRef, promoCounts, isDailyPromo
     }
 }
 let initialCoinsBeforeTopup = 0; // Để theo dõi số dư trước khi nạp
-let starterTopupUsed = false; // Đã nạp gói starter_v2 (80k) — ẩn gói sau lần đầu
+let starterTopupUsed = false; // Đã nạp gói starter_v2 (40k) — ẩn gói sau lần đầu
 let initialAuthSettled = false;
 
 function isStarterTopupRecord(data) {
     if (!data) return false;
     if (data.packageId === 'starter_v2') return true;
-    if (data.amount === 80000 && data.coins === 20) return true;
     if (data.amount === 40000 && data.coins === 20) return true;
     if (data.amount === 10000 && data.coins === 10) return true; // gói cũ
-    if (data.amount === 10000 && data.coins === 5) return true; // gói cũ
     return false;
 }
 
