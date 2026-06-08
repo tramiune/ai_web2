@@ -14,7 +14,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--provider",
-        choices=["aidancing", "xiaoyang"],
+        choices=["aidancing", "xiaoyang", "videoaieasy"],
         default="xiaoyang",
     )
     parser.add_argument("--bot-id", default="nhaycloud_vps_bot")
