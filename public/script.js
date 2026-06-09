@@ -2235,7 +2235,7 @@ window.selectTopup = async (id) => {
 
 window.openOrderModal = () => {
     updateFirstOrderUI();
-    window.switchVideoSource('tiktok');
+    window.switchVideoSource('upload');
     window.openModal('order-modal');
 
     requestAnimationFrame(() => {
