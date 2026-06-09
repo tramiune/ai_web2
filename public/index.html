@@ -618,7 +618,6 @@
             <button class="admin-tab-btn" onclick="switchAdminTab('topups')" data-i18n="admin.tab_topups">Nạp Coin</button>
             <button class="admin-tab-btn" onclick="switchAdminTab('referrals')" data-i18n="admin.tab_referrals">Hoa hồng GT</button>
             <button class="admin-tab-btn" onclick="switchAdminTab('bots')" data-i18n="admin.tab_bots">Bots</button>
-            <button class="admin-tab-btn" onclick="switchAdminTab('stats')" data-i18n="admin.tab_stats">Thống kê</button>
             <button id="tab-users" class="admin-tab-btn" onclick="switchAdminTab('users')"
                 style="display: none;" data-i18n="admin.tab_users">Thành viên</button>
         </div>
@@ -756,74 +755,6 @@
                             <tr><td colspan="5" style="text-align:center; opacity:0.5; padding:2rem;" data-i18n="admin.bots_empty">Chưa có bot nào. Chạy bot.py với --name trên server.</td></tr>
                         </tbody>
                     </table>
-                </div>
-            </div>
-        </div>
-
-        <!-- Tab: Stats -->
-        <div id="admin-tab-stats" class="admin-tab-content">
-            <div class="admin-section admin-stats-section">
-                <div class="admin-stats-toolbar">
-                    <div class="admin-stats-presets">
-                        <button type="button" class="btn-secondary admin-stats-preset active" data-preset="today" data-i18n="admin.stats_preset_today">Hôm nay</button>
-                        <button type="button" class="btn-secondary admin-stats-preset" data-preset="7d" data-i18n="admin.stats_preset_7d">7 ngày</button>
-                        <button type="button" class="btn-secondary admin-stats-preset" data-preset="30d" data-i18n="admin.stats_preset_30d">30 ngày</button>
-                        <button type="button" class="btn-secondary admin-stats-preset" data-preset="week" data-i18n="admin.stats_preset_week">Tuần này</button>
-                        <button type="button" class="btn-secondary admin-stats-preset" data-preset="month" data-i18n="admin.stats_preset_month">Tháng này</button>
-                    </div>
-                    <div class="admin-stats-custom">
-                        <input type="date" id="admin-stats-from" class="form-control" />
-                        <span>→</span>
-                        <input type="date" id="admin-stats-to" class="form-control" />
-                        <button type="button" class="btn-primary" id="admin-stats-refresh-btn" data-i18n="admin.stats_refresh">Tải lại</button>
-                    </div>
-                </div>
-                <p id="admin-stats-range-label" class="admin-stats-range-label"></p>
-                <p id="admin-stats-loading" class="admin-stats-loading" style="display:none;" data-i18n="admin.stats_loading">Đang tải dữ liệu...</p>
-                <p id="admin-stats-warning" class="admin-stats-warning" style="display:none;"></p>
-
-                <div class="admin-stats-kpi-grid">
-                    <div class="admin-stats-kpi"><span class="kpi-label" data-i18n="admin.stats_kpi_topup_users">Người nạp</span><strong id="stat-kpi-topup-users">—</strong></div>
-                    <div class="admin-stats-kpi"><span class="kpi-label" data-i18n="admin.stats_kpi_topup_vnd">VND nạp</span><strong id="stat-kpi-topup-vnd">—</strong></div>
-                    <div class="admin-stats-kpi"><span class="kpi-label" data-i18n="admin.stats_kpi_completed">Video OK</span><strong id="stat-kpi-completed" style="color:#4ade80;">—</strong></div>
-                    <div class="admin-stats-kpi"><span class="kpi-label" data-i18n="admin.stats_kpi_failed">Video fail</span><strong id="stat-kpi-failed" style="color:#f87171;">—</strong></div>
-                    <div class="admin-stats-kpi"><span class="kpi-label" data-i18n="admin.stats_kpi_render_cost">Chi phí render</span><strong id="stat-kpi-render-cost">—</strong></div>
-                    <div class="admin-stats-kpi"><span class="kpi-label" data-i18n="admin.stats_kpi_gross">Lợi nhuận gộp</span><strong id="stat-kpi-gross">—</strong></div>
-                </div>
-
-                <div class="admin-stats-charts">
-                    <div class="admin-stats-chart-card">
-                        <h3 data-i18n="admin.stats_chart_orders">Video theo ngày</h3>
-                        <canvas id="admin-stats-chart-orders" height="220"></canvas>
-                    </div>
-                    <div class="admin-stats-chart-card">
-                        <h3 data-i18n="admin.stats_chart_engine">Engine × model</h3>
-                        <canvas id="admin-stats-chart-engine" height="220"></canvas>
-                    </div>
-                    <div class="admin-stats-chart-card admin-stats-chart-wide">
-                        <h3 data-i18n="admin.stats_chart_topups">Nạp tiền theo ngày</h3>
-                        <canvas id="admin-stats-chart-topups" height="220"></canvas>
-                    </div>
-                </div>
-
-                <div class="admin-stats-table-wrap">
-                    <h3 data-i18n="admin.stats_table_title">Chi tiết theo ngày</h3>
-                    <div style="overflow-x:auto;">
-                        <table class="data-table">
-                            <thead>
-                                <tr>
-                                    <th data-i18n="admin.stats_col_date">Ngày</th>
-                                    <th data-i18n="admin.stats_kpi_topup_users">Người nạp</th>
-                                    <th data-i18n="admin.stats_col_topup_count">Lượt nạp</th>
-                                    <th data-i18n="admin.stats_kpi_topup_vnd">VND</th>
-                                    <th data-i18n="admin.stats_kpi_completed">OK</th>
-                                    <th data-i18n="admin.stats_kpi_failed">Fail</th>
-                                    <th data-i18n="admin.stats_kpi_render_cost">Cost</th>
-                                </tr>
-                            </thead>
-                            <tbody id="admin-stats-table-body"></tbody>
-                        </table>
-                    </div>
                 </div>
             </div>
         </div>
@@ -1276,7 +1207,6 @@
         </div>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <script src="lang-config.js"></script>
     <script src="translations.js"></script>
     <script src="translations-locales.js"></script>
