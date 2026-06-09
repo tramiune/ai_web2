@@ -726,16 +726,51 @@ def _http_poll_videoaieasy_orders(orders_to_check):
         account_id = (order_data.get("videoaieasyAccount") or "").strip()
         nick = order_data.get("videoaieasyAccountEmail") or account_id
         print(f"🧐 VideoAiEasy — job {job_id} (đơn {doc.id}, {nick})...")
+        job = None
         try:
             api = _get_vae_web_client(account_id or "default")
             acc = _videoaieasy_account_lookup(account_id)
             if acc:
                 _ensure_vae_web_session(api, acc["email"], acc["password"])
             job = api.get_job(job_id)
-        except (VideoAiEasyAuthError, VideoAiEasyError) as e:
+        except VideoAiEasyAuthError as e:
             print(f"❌ Poll VideoAiEasy {job_id}: {e}")
-            if isinstance(e, VideoAiEasyAuthError) and account_id:
+            if account_id:
                 _reset_vae_web_client(account_id)
+            acc = _videoaieasy_account_lookup(account_id)
+            if acc:
+                try:
+                    api = _get_vae_web_client(account_id)
+                    _ensure_vae_web_session(api, acc["email"], acc["password"])
+                    job = api.get_job(job_id)
+                    print(f"🔑 Poll VideoAiEasy {job_id} OK sau login lại ({nick})")
+                except (VideoAiEasyAuthError, VideoAiEasyError) as e2:
+                    print(f"❌ Poll VideoAiEasy {job_id} vẫn lỗi sau login: {e2}")
+                    continue
+            else:
+                continue
+        except VideoAiEasyError as e:
+            print(f"❌ Poll VideoAiEasy {job_id}: {e}")
+            continue
+        except Exception as e:
+            err = str(e)
+            if "padding" in err.lower() or "cookie" in err.lower():
+                print(f"❌ Poll VideoAiEasy {job_id}: session lỗi ({e})")
+                if account_id:
+                    _reset_vae_web_client(account_id)
+                acc = _videoaieasy_account_lookup(account_id)
+                if acc:
+                    try:
+                        api = _get_vae_web_client(account_id)
+                        _ensure_vae_web_session(api, acc["email"], acc["password"])
+                        job = api.get_job(job_id)
+                        print(f"🔑 Poll VideoAiEasy {job_id} OK sau login lại ({nick})")
+                    except Exception as e2:
+                        print(f"❌ Poll VideoAiEasy {job_id} vẫn lỗi sau login: {e2}")
+                continue
+            print(f"❌ Poll VideoAiEasy {job_id}: {e}")
+            continue
+        if job is None:
             continue
         status = (job.get("status") or "").lower()
         err = job.get("error_message")

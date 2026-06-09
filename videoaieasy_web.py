@@ -5,6 +5,7 @@ Video AI Easy (videoaieasy.hdgr.online) — web session cho nhay.cloud bot.
 from __future__ import annotations
 
 import base64
+import binascii
 import json
 import mimetypes
 import os
@@ -76,6 +77,8 @@ class VideoAiEasyClient:
             }
         )
         self._user_email: str | None = None
+        self._cred_email: str | None = None
+        self._cred_password: str | None = None
         self._load_session()
 
     def _save_session(self) -> None:
@@ -99,22 +102,97 @@ class VideoAiEasyClient:
         except Exception:
             pass
 
-    def _api(self, method: str, path: str, **kwargs) -> dict:
-        timeout = kwargs.pop("timeout", 120)
-        url = f"{ORIGIN}{path if path.startswith('/') else '/' + path}"
-        r = self.session.request(method, url, timeout=timeout, **kwargs)
+    def _cookie_value_from_file(self) -> str:
+        if not self.session_file.is_file():
+            return ""
+        try:
+            data = json.loads(self.session_file.read_text(encoding="utf-8"))
+            return (data.get("cookie_value") or "").strip()
+        except Exception:
+            return ""
+
+    def _get_cookie_value(self) -> str:
+        raw = (self.session.cookies.get(AUTH_COOKIE, "") or "").strip()
+        if raw.startswith("base64-"):
+            try:
+                self._parse_cookie_payload(raw)
+                return raw
+            except VideoAiEasyAuthError:
+                pass
+        file_val = self._cookie_value_from_file()
+        if file_val.startswith("base64-"):
+            self.session.cookies.set(
+                AUTH_COOKIE, file_val, domain="videoaieasy.hdgr.online", path="/"
+            )
+            return file_val
+        return raw
+
+    def _parse_cookie_payload(self, raw: str) -> dict:
+        if not raw.startswith("base64-"):
+            raise VideoAiEasyAuthError("Chưa có session cookie")
+        try:
+            return json.loads(base64.b64decode(raw[7:]).decode("utf-8"))
+        except (binascii.Error, ValueError, json.JSONDecodeError) as e:
+            raise VideoAiEasyAuthError(f"Cookie không hợp lệ — login lại ({e})")
+
+    def _clear_session(self) -> None:
+        try:
+            self.session.cookies.clear(domain="videoaieasy.hdgr.online", path="/", name=AUTH_COOKIE)
+        except TypeError:
+            try:
+                del self.session.cookies[AUTH_COOKIE]
+            except KeyError:
+                pass
+        if self.session_file.is_file():
+            try:
+                self.session_file.unlink()
+            except OSError:
+                pass
+
+    def set_credentials(self, email: str | None, password: str | None) -> None:
+        self._cred_email = (email or "").strip() or None
+        self._cred_password = password or None
+
+    def _can_relogin(self) -> bool:
+        return bool(self._cred_email and self._cred_password)
+
+    def _probe_site_api(self) -> None:
+        """Cookie Supabase còn sống nhưng /api/* site có thể đã 401."""
+        r = self.session.get(f"{ORIGIN}/api/jobs", timeout=30)
         if r.status_code == 401:
             raise VideoAiEasyAuthError("Session hết hạn — login lại")
+
+    def _request_site(self, method: str, path: str, **kwargs) -> requests.Response:
+        timeout = kwargs.pop("timeout", 120)
+        url = f"{ORIGIN}{path if path.startswith('/') else '/' + path}"
+        return self.session.request(method, url, timeout=timeout, **kwargs)
+
+    def _api(self, method: str, path: str, **kwargs) -> dict:
+        def _once() -> dict:
+            r = self._request_site(method, path, **kwargs)
+            if r.status_code == 401:
+                raise VideoAiEasyAuthError("Session hết hạn — login lại")
+            try:
+                body = r.json() if r.content else {}
+            except Exception:
+                body = {"error": (r.text or "")[:500]}
+            if not r.ok:
+                err = body.get("error") if isinstance(body, dict) else None
+                raise VideoAiEasyError(
+                    f"HTTP {r.status_code}: {err or (r.text or '')[:300]}"
+                )
+            if isinstance(body, dict) and body.get("ok") is False:
+                raise VideoAiEasyError(body.get("error") or "API lỗi")
+            return body if isinstance(body, dict) else {"data": body}
+
         try:
-            body = r.json() if r.content else {}
-        except Exception:
-            body = {"error": (r.text or "")[:500]}
-        if not r.ok:
-            err = body.get("error") if isinstance(body, dict) else None
-            raise VideoAiEasyError(f"HTTP {r.status_code}: {err or (r.text or '')[:300]}")
-        if isinstance(body, dict) and body.get("ok") is False:
-            raise VideoAiEasyError(body.get("error") or "API lỗi")
-        return body if isinstance(body, dict) else {"data": body}
+            return _once()
+        except VideoAiEasyAuthError:
+            if not self._can_relogin():
+                raise
+            print(f"🔑 VideoAiEasy ({self._cred_email}) session hết hạn — login lại...")
+            self.login(self._cred_email, self._cred_password)
+            return _once()
 
     def login(self, email: str | None = None, password: str | None = None) -> dict:
         email = (email or get_env("VIDEOAIEASY_EMAIL") or "").strip()
@@ -138,11 +216,20 @@ class VideoAiEasyClient:
         return sess
 
     def ensure_session(self, email: str | None = None, password: str | None = None) -> dict:
+        self.set_credentials(email, password)
+
+        def _validate() -> dict:
+            profile = self.get_profile()
+            self._probe_site_api()
+            return profile
+
         try:
-            return self.get_profile()
+            return _validate()
         except (VideoAiEasyAuthError, VideoAiEasyError):
+            print(f"🔑 VideoAiEasy ({self._cred_email or email}) — login lại...")
+            self._clear_session()
             self.login(email, password)
-            return self.get_profile()
+            return _validate()
 
     def get_profile(self) -> dict:
         me = self._current_user()
@@ -163,20 +250,14 @@ class VideoAiEasyClient:
         return rows[0]
 
     def _access_token(self) -> str:
-        raw = self.session.cookies.get(AUTH_COOKIE, "")
-        if not raw.startswith("base64-"):
-            raise VideoAiEasyAuthError("Chưa có session cookie")
-        payload = json.loads(base64.b64decode(raw[7:]).decode("utf-8"))
+        payload = self._parse_cookie_payload(self._get_cookie_value())
         token = payload.get("access_token")
         if not token:
             raise VideoAiEasyAuthError("Cookie không có access_token")
         return token
 
     def _current_user(self) -> dict:
-        raw = self.session.cookies.get(AUTH_COOKIE, "")
-        if not raw.startswith("base64-"):
-            raise VideoAiEasyAuthError("Chưa đăng nhập")
-        payload = json.loads(base64.b64decode(raw[7:]).decode("utf-8"))
+        payload = self._parse_cookie_payload(self._get_cookie_value())
         user = payload.get("user") or {}
         if not user.get("id"):
             raise VideoAiEasyAuthError("Cookie không hợp lệ")
@@ -245,17 +326,27 @@ class VideoAiEasyClient:
         dest_path = os.path.abspath(dest_path)
         os.makedirs(os.path.dirname(dest_path) or ".", exist_ok=True)
         url = f"{ORIGIN}/api/download/{job_id}"
-        with self.session.get(
-            url,
-            stream=True,
-            timeout=int(get_env("VIDEOAIEASY_DOWNLOAD_TIMEOUT_SEC", "600")),
-        ) as r:
-            if r.status_code == 401:
-                raise VideoAiEasyAuthError("Session hết hạn khi tải video")
-            if not r.ok:
-                raise VideoAiEasyError(f"Download HTTP {r.status_code}: {(r.text or '')[:300]}")
-            with open(dest_path, "wb") as f:
-                for chunk in r.iter_content(chunk_size=256 * 1024):
-                    if chunk:
-                        f.write(chunk)
+        timeout = int(get_env("VIDEOAIEASY_DOWNLOAD_TIMEOUT_SEC", "600"))
+
+        def _once() -> None:
+            with self.session.get(url, stream=True, timeout=timeout) as r:
+                if r.status_code == 401:
+                    raise VideoAiEasyAuthError("Session hết hạn khi tải video")
+                if not r.ok:
+                    raise VideoAiEasyError(
+                        f"Download HTTP {r.status_code}: {(r.text or '')[:300]}"
+                    )
+                with open(dest_path, "wb") as f:
+                    for chunk in r.iter_content(chunk_size=256 * 1024):
+                        if chunk:
+                            f.write(chunk)
+
+        try:
+            _once()
+        except VideoAiEasyAuthError:
+            if not self._can_relogin():
+                raise
+            print(f"🔑 VideoAiEasy ({self._cred_email}) — login lại trước khi tải video...")
+            self.login(self._cred_email, self._cred_password)
+            _once()
         return dest_path
