@@ -163,6 +163,9 @@ class XiaoyangWebClient:
                 raise
         raise XiaoyangWebError(f"Upload thất bại: {last_err}")
 
+    def list_modals(self) -> dict:
+        return self._request("GET", "/api/modals")
+
     def create_motion_task(
         self,
         *,
@@ -182,6 +185,39 @@ class XiaoyangWebClient:
             "video_token": video_token,
             "motion_orientation": motion_orientation,
             "enhance_4k": bool(enhance_4k),
+        }
+        return self._request(
+            "POST",
+            "/api/tasks",
+            json=body,
+            headers={"Content-Type": "application/json"},
+            timeout=int(get_env("XIAOYANG_CREATE_TIMEOUT_SEC", "120")),
+        )
+
+    def create_wardrobe_task(
+        self,
+        *,
+        image_token: str,
+        clothes_image_token: str,
+        prompt: str = "",
+        modal_key: str | None = None,
+        option_key: str | None = None,
+        wardrobe_replace: str | None = None,
+    ) -> dict:
+        """Thay đồ — ảnh mẫu (image_token) + ảnh trang phục (clothes_image_token)."""
+        modal_key = (modal_key or get_env("XIAOYANG_WARDROBE_MODAL_KEY") or "").strip()
+        if not modal_key:
+            raise XiaoyangWebError("Thiếu XIAOYANG_WARDROBE_MODAL_KEY trong .env")
+        option_key = (option_key or get_env("XIAOYANG_WARDROBE_OPTION_KEY") or "default").strip()
+        wardrobe_replace = (wardrobe_replace or get_env("XIAOYANG_WARDROBE_REPLACE") or "full").strip()
+        prompt = (prompt or get_env("XIAOYANG_WARDROBE_PROMPT") or "Keep pose and background").strip()
+        body = {
+            "modal_key": modal_key,
+            "option_key": option_key,
+            "prompt": prompt,
+            "image_token": image_token,
+            "clothes_image_token": clothes_image_token,
+            "wardrobe_replace": wardrobe_replace,
         }
         return self._request(
             "POST",

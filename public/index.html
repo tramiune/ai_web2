@@ -153,14 +153,13 @@
                             <span id="dropdown-user-email">email@gmail.com</span>
                         </div>
                         <hr class="dropdown-divider">
-                        <!-- Tạm ẩn: Xây kênh 1000fl
-                        <a href="javascript:void(0)" class="dropdown-item premium-nav-item" onclick="window.navTo('build-channel-page')">
+                        <a href="javascript:void(0)" id="admin-dropdown-item-batch-channel" class="dropdown-item premium-nav-item"
+                            style="display: none;" onclick="window.navTo('build-channel-page')">
                             <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                 <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"></path>
                             </svg>
-                            <span data-i18n="navbar.build_channel">Xây kênh 1000 fl / 21 ngày</span>
+                            <span data-i18n="navbar.build_channel">Xây kênh tự động</span>
                         </a>
-                        -->
                         <a href="javascript:void(0)" class="dropdown-item" onclick="window.navTo('referral-page')">
                             <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                                 <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path>
@@ -590,18 +589,51 @@
         </div>
 
         <div class="section-header" style="text-align: left; margin-bottom: 1.5rem; margin-top: 2rem; display: flex; align-items: center; justify-content: space-between;">
-            <h2 data-i18n="navbar.build_channel">Xây kênh 1000 fl / 21 ngày</h2>
+            <h2 data-i18n="build_channel.title">Xây kênh tự động (Admin)</h2>
             <button class="btn-secondary" onclick="window.navTo('user-dashboard')" style="padding: 0.5rem 1rem; font-size: 0.8rem;">
                 <span data-i18n="modals.back">Quay lại</span>
             </button>
         </div>
-        
-        <div class="glass-card" style="padding: 4rem 2rem; text-align: center;">
-            <div style="font-size: 4rem; margin-bottom: 1rem;">🚀</div>
-            <h2 style="color: #ffde00; margin-bottom: 1rem;" data-i18n="build_channel.coming_soon_title">Tính năng đang phát triển</h2>
-            <p style="color: var(--text-muted); max-width: 500px; margin: 0 auto; line-height: 1.6;" data-i18n="build_channel.coming_soon_desc">
-                Chúng tôi đang xây dựng lộ trình chi tiết giúp bạn đạt 1000 followers trên TikTok chỉ trong 21 ngày. Vui lòng quay lại sau!
+
+        <div class="glass-card" style="padding: 1.5rem; margin-bottom: 1.5rem;">
+            <p style="margin: 0 0 1rem; opacity: 0.8; line-height: 1.5;" data-i18n="build_channel.desc">
+                Upload ảnh mẫu + link kênh TikTok một lần. Mỗi ngày <b>3:00 sáng (VN)</b> hệ thống lấy video hôm qua → thay đồ XiaoYang → tạo video copy motion.
             </p>
+            <div style="display: grid; gap: 1rem; max-width: 520px;">
+                <div>
+                    <label style="display:block; font-size:0.85rem; opacity:0.7; margin-bottom:0.4rem;" data-i18n="build_channel.template_label">Ảnh mẫu (nhân vật + background)</label>
+                    <input type="file" id="batch-template-input" accept="image/*" class="form-control">
+                    <div id="batch-template-preview" style="margin-top:0.75rem; max-width:200px;"></div>
+                </div>
+                <div>
+                    <label style="display:block; font-size:0.85rem; opacity:0.7; margin-bottom:0.4rem;" data-i18n="build_channel.channel_label">Link kênh TikTok</label>
+                    <input type="url" id="batch-channel-url" class="form-control" placeholder="https://www.tiktok.com/@username" data-i18n="build_channel.channel_placeholder">
+                </div>
+                <div style="display:flex; gap:0.75rem; flex-wrap:wrap; align-items:center;">
+                    <button type="button" class="btn-primary" id="batch-channel-start-btn" onclick="window.saveBatchChannelConfig(true)" data-i18n="build_channel.start_btn">Bắt đầu (3h sáng tự chạy)</button>
+                    <button type="button" class="btn-secondary" id="batch-channel-stop-btn" onclick="window.saveBatchChannelConfig(false)" data-i18n="build_channel.stop_btn">Tắt</button>
+                </div>
+                <p id="batch-channel-status" style="margin:0; font-size:0.85rem; opacity:0.75;"></p>
+            </div>
+        </div>
+
+        <div class="section-header" style="text-align: left; margin-bottom: 1rem;">
+            <h3 data-i18n="build_channel.runs_title">Lịch sử chạy batch</h3>
+        </div>
+        <div class="data-table-container" style="background: var(--bg-card); border-radius: var(--radius-md);">
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th data-i18n="build_channel.col_date">Ngày (VN)</th>
+                        <th data-i18n="build_channel.col_videos">Video</th>
+                        <th data-i18n="build_channel.col_orders">Đơn tạo</th>
+                        <th data-i18n="build_channel.col_status">Trạng thái</th>
+                    </tr>
+                </thead>
+                <tbody id="batch-channel-runs-list">
+                    <tr><td colspan="4" style="text-align:center; opacity:0.5; padding:2rem;" data-i18n="build_channel.runs_empty">Chưa có lần chạy nào.</td></tr>
+                </tbody>
+            </table>
         </div>
     </div>
 

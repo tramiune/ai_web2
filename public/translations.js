@@ -22,7 +22,7 @@ window.TRANSLATIONS = {
             terms: "Điều khoản",
             privacy: "Bảo mật",
             home: "Chọn video AI",
-            build_channel: "Xây kênh 1000 fl / 21 ngày",
+            build_channel: "Xây kênh tự động",
             referral: "Giới thiệu bạn bè",
             admin_panel: "Admin Panel"
         },
@@ -53,8 +53,25 @@ window.TRANSLATIONS = {
             paypal_load_error: "Lỗi tải PayPal: {msg}"
         },
         build_channel: {
-            coming_soon_title: "Tính năng đang phát triển",
-            coming_soon_desc: "Chúng tôi đang xây dựng lộ trình chi tiết giúp bạn đạt 1000 followers trên TikTok chỉ trong 21 ngày. Vui lòng quay lại sau!"
+            title: "Xây kênh tự động (Admin)",
+            desc: "Upload ảnh mẫu + link kênh TikTok một lần. Mỗi ngày <b>3:00 sáng (VN)</b> hệ thống lấy video hôm qua → thay đồ XiaoYang → tạo video copy motion.",
+            template_label: "Ảnh mẫu (nhân vật + background)",
+            channel_label: "Link kênh TikTok",
+            channel_placeholder: "https://www.tiktok.com/@username",
+            start_btn: "Bắt đầu (3h sáng tự chạy)",
+            stop_btn: "Tắt",
+            status_off: "Đang tắt — bấm Bắt đầu để kích hoạt cron 3h sáng.",
+            status_on: "Đang bật — cron 3:00 sáng VN mỗi ngày.",
+            status_saved: "Đã lưu cấu hình batch kênh.",
+            status_need_template: "Vui lòng chọn ảnh mẫu.",
+            status_need_channel: "Vui lòng dán link kênh TikTok.",
+            status_admin_only: "Chỉ admin mới dùng được tính năng này.",
+            runs_title: "Lịch sử chạy batch",
+            runs_empty: "Chưa có lần chạy nào.",
+            col_date: "Ngày (VN)",
+            col_videos: "Video",
+            col_orders: "Đơn tạo",
+            col_status: "Trạng thái"
         },
         referral: {
             title: "Giới thiệu bạn bè - Nhận 10% hoa hồng",
@@ -252,7 +269,7 @@ window.TRANSLATIONS = {
             topup: "Nạp thêm",
             create_new: "+ Tạo video mới",
             my_videos: "Video của tôi",
-            build_channel: "Xây kênh 1000 fl / 21 ngày",
+            build_channel: "Xây kênh tự động",
             topup_history: "Lịch sử nạp coin",
             col_image: "Ảnh",
             col_video_date: "Video & Ngày",
@@ -707,7 +724,7 @@ window.TRANSLATIONS = {
             terms: "Terms",
             privacy: "Privacy",
             home: "Select AI Video",
-            build_channel: "1k Followers / 21 days",
+            build_channel: "Auto channel",
             referral: "Refer a Friend",
             admin_panel: "Admin Panel"
         },
@@ -738,8 +755,25 @@ window.TRANSLATIONS = {
             paypal_load_error: "Failed to load PayPal: {msg}"
         },
         build_channel: {
-            coming_soon_title: "Feature in development",
-            coming_soon_desc: "We are building a detailed roadmap to help you reach 1000 TikTok followers in just 21 days. Please check back soon!"
+            title: "Auto channel (Admin)",
+            desc: "Upload a template image and TikTok channel link once. Every day at <b>3:00 AM (VN)</b> the system fetches yesterday's videos → XiaoYang outfit swap → motion copy orders.",
+            template_label: "Template image (character + background)",
+            channel_label: "TikTok channel link",
+            channel_placeholder: "https://www.tiktok.com/@username",
+            start_btn: "Start (runs at 3 AM daily)",
+            stop_btn: "Stop",
+            status_off: "Disabled — click Start to enable the 3 AM cron.",
+            status_on: "Enabled — runs daily at 3:00 AM VN.",
+            status_saved: "Batch channel config saved.",
+            status_need_template: "Please choose a template image.",
+            status_need_channel: "Please paste a TikTok channel link.",
+            status_admin_only: "Admin only.",
+            runs_title: "Batch run history",
+            runs_empty: "No runs yet.",
+            col_date: "Date (VN)",
+            col_videos: "Videos",
+            col_orders: "Orders",
+            col_status: "Status"
         },
         referral: {
             title: "Refer Friends - Earn 10% Commission",
@@ -937,7 +971,7 @@ window.TRANSLATIONS = {
             topup: "Top-up",
             create_new: "+ Create New Video",
             my_videos: "My Videos",
-            build_channel: "1k Followers / 21 days",
+            build_channel: "Auto channel",
             topup_history: "Top-up History",
             col_image: "Image",
             col_video_date: "Video & Date",

@@ -1472,6 +1472,8 @@ async function handleUserLoggedIn(user) {
             if (isAdmin) {
                 const adminProfileItem = document.getElementById('admin-dropdown-item-profile');
                 if (adminProfileItem) adminProfileItem.style.display = 'flex';
+                const batchChannelItem = document.getElementById('admin-dropdown-item-batch-channel');
+                if (batchChannelItem) batchChannelItem.style.display = 'flex';
                 const adminDivider = document.getElementById('admin-dropdown-divider');
                 if (adminDivider) adminDivider.style.display = 'block';
 
@@ -1492,6 +1494,8 @@ async function handleUserLoggedIn(user) {
             } else {
                 const adminProfileItem = document.getElementById('admin-dropdown-item-profile');
                 if (adminProfileItem) adminProfileItem.style.display = 'none';
+                const batchChannelItem = document.getElementById('admin-dropdown-item-batch-channel');
+                if (batchChannelItem) batchChannelItem.style.display = 'none';
                 const adminDivider = document.getElementById('admin-dropdown-divider');
                 if (adminDivider) adminDivider.style.display = 'none';
 
@@ -1615,9 +1619,15 @@ function showTopupHistory() {
 }
 
 function showBuildChannel() {
+    if (!window.__isAdmin) {
+        showToast(t('build_channel.status_admin_only'));
+        showDashboard();
+        return;
+    }
     hideAllPages();
     document.getElementById('build-channel-page').style.display = 'block';
     window.scrollTo(0, 0);
+    loadBatchChannelPage();
 }
 
 function showAdminPanel() {
@@ -5670,4 +5680,136 @@ async function payReferralCommissionClient(topupId, referredUserId, baseCoins, g
     console.log(`[Referral] Paid ${commissionCoins} coin + ${commissionAmount} ${currency} commission to ${referrerId} for topup ${topupId}`);
 }
 window.payReferralCommissionClient = payReferralCommissionClient;
+
+// --- Batch channel (admin) ---
+const BATCH_CHANNEL_CONFIG_ID = 'default';
+
+function parseTikTokUsername(raw) {
+    const s = (raw || '').trim();
+    if (!s) return '';
+    if (s.startsWith('@')) return s.slice(1).split('/')[0];
+    const m = s.match(/tiktok\.com\/@([^/?#]+)/i);
+    if (m) return m[1];
+    return s.replace(/^@/, '').split('/')[0];
+}
+
+function renderBatchChannelStatus(cfg) {
+    const el = document.getElementById('batch-channel-status');
+    if (!el) return;
+    if (!cfg) {
+        el.innerHTML = t('build_channel.status_off');
+        return;
+    }
+    const on = !!cfg.enabled;
+    const extra = cfg.lastRunMessage ? ` — ${cfg.lastRunMessage}` : '';
+    el.innerHTML = (on ? t('build_channel.status_on') : t('build_channel.status_off')) + extra;
+}
+
+function renderBatchChannelRuns(rows) {
+    const tbody = document.getElementById('batch-channel-runs-list');
+    if (!tbody) return;
+    if (!rows.length) {
+        tbody.innerHTML = `<tr><td colspan="4" style="text-align:center; opacity:0.5; padding:2rem;">${t('build_channel.runs_empty')}</td></tr>`;
+        return;
+    }
+    tbody.innerHTML = rows.map((r) => `
+        <tr>
+            <td>${escapeHTML(r.dateVN || '—')}</td>
+            <td>${Number(r.videosFound) || 0}</td>
+            <td>${Number(r.ordersCreated) || 0}</td>
+            <td>${escapeHTML(r.status || '—')}</td>
+        </tr>
+    `).join('');
+}
+
+async function loadBatchChannelPage() {
+    if (!window.__isAdmin || !currentUser) return;
+    const { db, doc, getDoc, collection, query, orderBy, limit, getDocs, onSnapshot } = window.firebase;
+
+    try {
+        const cfgSnap = await getDoc(doc(db, 'batchChannelConfig', BATCH_CHANNEL_CONFIG_ID));
+        const cfg = cfgSnap.exists() ? cfgSnap.data() : null;
+        renderBatchChannelStatus(cfg);
+        const urlInput = document.getElementById('batch-channel-url');
+        if (urlInput && cfg?.channelUrl) urlInput.value = cfg.channelUrl;
+        const preview = document.getElementById('batch-template-preview');
+        if (preview && cfg?.templateImageUrl) {
+            preview.innerHTML = `<img src="${escapeHTML(cfg.templateImageUrl)}" alt="" style="width:100%; border-radius:8px;">`;
+        }
+    } catch (e) {
+        console.error('[BatchChannel] load config:', e);
+    }
+
+    fbUnsub('batchChannelRuns');
+    const runsQ = query(collection(db, 'batchChannelRuns'), orderBy('startedAt', 'desc'), limit(20));
+    fbSub('batchChannelRuns', onSnapshot(runsQ, (snap) => {
+        const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+        renderBatchChannelRuns(rows);
+    }, (err) => console.error('[BatchChannel] runs listener:', err)));
+}
+
+window.saveBatchChannelConfig = async (enable) => {
+    if (!window.__isAdmin || !currentUser) {
+        return showToast(t('build_channel.status_admin_only'));
+    }
+    const { db, doc, getDoc, setDoc, serverTimestamp } = window.firebase;
+    const channelUrl = document.getElementById('batch-channel-url')?.value?.trim() || '';
+    const username = parseTikTokUsername(channelUrl);
+    if (enable && !username) {
+        return showToast(t('build_channel.status_need_channel'));
+    }
+
+    let templateImageUrl = '';
+    let existingStartedAt = null;
+    try {
+        const existing = await getDoc(doc(db, 'batchChannelConfig', BATCH_CHANNEL_CONFIG_ID));
+        if (existing.exists()) {
+            const d = existing.data();
+            templateImageUrl = d.templateImageUrl || '';
+            existingStartedAt = d.startedAt || null;
+        }
+    } catch (_) { /* ignore */ }
+
+    const fileInput = document.getElementById('batch-template-input');
+    const file = fileInput?.files?.[0];
+    if (enable && file) {
+        try {
+            templateImageUrl = await uploadFile(file, 'characters');
+            const preview = document.getElementById('batch-template-preview');
+            if (preview) {
+                preview.innerHTML = `<img src="${escapeHTML(templateImageUrl)}" alt="" style="width:100%; border-radius:8px;">`;
+            }
+        } catch (e) {
+            console.error('[BatchChannel] upload template:', e);
+            return showToast(e.message || t('upload.error_network'));
+        }
+    }
+    if (enable && !templateImageUrl) {
+        return showToast(t('build_channel.status_need_template'));
+    }
+
+    const payload = {
+        enabled: !!enable,
+        channelUrl: channelUrl,
+        channelUsername: username,
+        templateImageUrl: templateImageUrl,
+        createdBy: currentUser.uid,
+        createdByEmail: currentUser.email || '',
+        createdByName: currentUser.displayName || userDisplayLabel(currentUser),
+        updatedAt: serverTimestamp()
+    };
+    if (enable && !existingStartedAt) {
+        payload.startedAt = serverTimestamp();
+    }
+
+    try {
+        await setDoc(doc(db, 'batchChannelConfig', BATCH_CHANNEL_CONFIG_ID), payload, { merge: true });
+        renderBatchChannelStatus({ ...payload, enabled: !!enable });
+        showToast(t('build_channel.status_saved'));
+        if (fileInput) fileInput.value = '';
+    } catch (e) {
+        console.error('[BatchChannel] save:', e);
+        showToast(t('common.error_system', { msg: e.message || e.code || 'save' }));
+    }
+};
 
