@@ -20,7 +20,7 @@ load_project_env()
 
 from aidancing_api import AidancingApiClient, SessionExpiredError
 from xiaoyang_api import XiaoyangApiClient, XiaoyangAuthError as XiaoyangApiAuthError, XiaoyangApiError
-from xiaoyang_direct import DirectMediaError
+from xiaoyang_direct import DirectMediaError, upload_result_file
 from xiaoyang_media import MediaValidationError
 from xiaoyang_web import XiaoyangWebClient, XiaoyangAuthError as XiaoyangWebAuthError, XiaoyangWebError
 from videoaieasy_web import (
@@ -1441,14 +1441,10 @@ def download_aidancing_result(session, page, url, filename, download_locator=Non
     return download_file(url, filename, cookies=jar, referer=DASHBOARD_URL, retries=3)
 
 def upload_to_r2(file_path, folder="results"):
-    print(f"📤 Đang upload lên R2...")
     try:
-        file_name = f"{folder}/{int(time.time() * 1000)}_{os.path.basename(file_path)}"
-        url = f"{WORKER_URL}/?file={requests.utils.quote(file_name)}&t={int(time.time() * 1000)}"
-        with open(file_path, 'rb') as f:
-            response = requests.post(url, data=f, headers={'Content-Type': 'video/mp4'}, timeout=120)
-            if response.status_code == 200:
-                return response.json().get('url')
+        return upload_result_file(file_path, folder=folder)
+    except DirectMediaError as e:
+        print(f"❌ Lỗi R2: {e}")
     except Exception as e:
         print(f"❌ Lỗi R2: {e}")
     return None
