@@ -5693,11 +5693,22 @@ function parseTikTokUsername(raw) {
     return s.replace(/^@/, '').split('/')[0];
 }
 
+function batchChannelRunNowPending(cfg) {
+    if (!cfg?.runNowRequestedAt) return false;
+    const req = cfg.runNowRequestedAt?.toMillis?.() ?? cfg.runNowRequestedAt?.seconds * 1000 ?? 0;
+    const handled = cfg.runNowHandledAt?.toMillis?.() ?? cfg.runNowHandledAt?.seconds * 1000 ?? 0;
+    return req > handled;
+}
+
 function renderBatchChannelStatus(cfg) {
     const el = document.getElementById('batch-channel-status');
     if (!el) return;
     if (!cfg) {
         el.innerHTML = t('build_channel.status_off');
+        return;
+    }
+    if (batchChannelRunNowPending(cfg)) {
+        el.innerHTML = t('build_channel.status_run_now_pending');
         return;
     }
     const on = !!cfg.enabled;
@@ -5726,19 +5737,19 @@ async function loadBatchChannelPage() {
     if (!window.__isAdmin || !currentUser) return;
     const { db, doc, getDoc, collection, query, orderBy, limit, getDocs, onSnapshot } = window.firebase;
 
-    try {
-        const cfgSnap = await getDoc(doc(db, 'batchChannelConfig', BATCH_CHANNEL_CONFIG_ID));
-        const cfg = cfgSnap.exists() ? cfgSnap.data() : null;
+    fbUnsub('batchChannelConfig');
+    fbSub('batchChannelConfig', onSnapshot(doc(db, 'batchChannelConfig', BATCH_CHANNEL_CONFIG_ID), (snap) => {
+        const cfg = snap.exists() ? snap.data() : null;
         renderBatchChannelStatus(cfg);
         const urlInput = document.getElementById('batch-channel-url');
-        if (urlInput && cfg?.channelUrl) urlInput.value = cfg.channelUrl;
+        if (urlInput && cfg?.channelUrl && !urlInput.value.trim()) {
+            urlInput.value = cfg.channelUrl;
+        }
         const preview = document.getElementById('batch-template-preview');
-        if (preview && cfg?.templateImageUrl) {
+        if (preview && cfg?.templateImageUrl && !preview.querySelector('img')) {
             preview.innerHTML = `<img src="${escapeHTML(cfg.templateImageUrl)}" alt="" style="width:100%; border-radius:8px;">`;
         }
-    } catch (e) {
-        console.error('[BatchChannel] load config:', e);
-    }
+    }, (err) => console.error('[BatchChannel] config listener:', err)));
 
     fbUnsub('batchChannelRuns');
     const runsQ = query(collection(db, 'batchChannelRuns'), orderBy('startedAt', 'desc'), limit(20));
@@ -5810,6 +5821,61 @@ window.saveBatchChannelConfig = async (enable) => {
     } catch (e) {
         console.error('[BatchChannel] save:', e);
         showToast(t('common.error_system', { msg: e.message || e.code || 'save' }));
+    }
+};
+
+window.triggerBatchChannelRunNow = async () => {
+    if (!window.__isAdmin || !currentUser) {
+        return showToast(t('build_channel.status_admin_only'));
+    }
+    const btn = document.getElementById('batch-channel-run-now-btn');
+    if (btn) btn.disabled = true;
+    const { db, doc, getDoc, setDoc, serverTimestamp } = window.firebase;
+    try {
+        const channelUrl = document.getElementById('batch-channel-url')?.value?.trim() || '';
+        const username = parseTikTokUsername(channelUrl);
+        if (!username) {
+            return showToast(t('build_channel.status_need_channel'));
+        }
+
+        let templateImageUrl = '';
+        const existing = await getDoc(doc(db, 'batchChannelConfig', BATCH_CHANNEL_CONFIG_ID));
+        if (existing.exists()) {
+            templateImageUrl = existing.data().templateImageUrl || '';
+        }
+
+        const fileInput = document.getElementById('batch-template-input');
+        const file = fileInput?.files?.[0];
+        if (file) {
+            templateImageUrl = await uploadFile(file, 'characters');
+            const preview = document.getElementById('batch-template-preview');
+            if (preview) {
+                preview.innerHTML = `<img src="${escapeHTML(templateImageUrl)}" alt="" style="width:100%; border-radius:8px;">`;
+            }
+            if (fileInput) fileInput.value = '';
+        }
+        if (!templateImageUrl) {
+            return showToast(t('build_channel.status_need_template'));
+        }
+
+        await setDoc(doc(db, 'batchChannelConfig', BATCH_CHANNEL_CONFIG_ID), {
+            channelUrl,
+            channelUsername: username,
+            templateImageUrl,
+            createdBy: currentUser.uid,
+            createdByEmail: currentUser.email || '',
+            createdByName: currentUser.displayName || userDisplayLabel(currentUser),
+            runNowRequestedAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+        }, { merge: true });
+
+        renderBatchChannelStatus({ runNowRequestedAt: { toMillis: () => Date.now() + 1 } });
+        showToast(t('build_channel.status_run_now_queued'));
+    } catch (e) {
+        console.error('[BatchChannel] run now:', e);
+        showToast(t('common.error_system', { msg: e.message || e.code || 'run' }));
+    } finally {
+        if (btn) btn.disabled = false;
     }
 };
 

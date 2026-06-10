@@ -295,7 +295,49 @@ def upload_motion_video(local_path: str) -> str:
     return url
 
 
-def run_batch(*, force: bool = False) -> int:
+def _firestore_ts_seconds(ts) -> float:
+    if ts is None:
+        return 0.0
+    if hasattr(ts, "timestamp"):
+        return float(ts.timestamp())
+    try:
+        return float(ts)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def poll_run_now_trigger() -> int:
+    """Cron mỗi phút — chạy batch khi admin bấm「Chạy thử ngay」trên web."""
+    if not firebase_admin._apps:
+        cred = credentials.Certificate(str(ROOT / "serviceAccountKey.json"))
+        firebase_admin.initialize_app(cred)
+    db = firestore.client()
+    cfg_ref = db.collection(CONFIG_COLLECTION).document(CONFIG_DOC)
+    cfg_snap = cfg_ref.get()
+    if not cfg_snap.exists:
+        return 0
+    cfg = cfg_snap.to_dict() or {}
+    requested = cfg.get("runNowRequestedAt")
+    if not requested:
+        return 0
+    handled = cfg.get("runNowHandledAt")
+    if _firestore_ts_seconds(handled) >= _firestore_ts_seconds(requested):
+        return 0
+    running = (
+        db.collection(RUNS_COLLECTION)
+        .where("status", "==", "running")
+        .limit(1)
+        .stream()
+    )
+    if any(True for _ in running):
+        print("⏳ Batch đang chạy — bỏ qua trigger mới.")
+        return 0
+    cfg_ref.update({"runNowHandledAt": requested})
+    print("🚀 Trigger「Chạy thử ngay」từ web — test 1 video mới nhất.")
+    return run_batch(force=True, test_latest=1, manual=True)
+
+
+def run_batch(*, force: bool = False, test_latest: int | None = None, manual: bool = False) -> int:
     if not firebase_admin._apps:
         cred = credentials.Certificate(str(ROOT / "serviceAccountKey.json"))
         firebase_admin.initialize_app(cred)
@@ -306,7 +348,7 @@ def run_batch(*, force: bool = False) -> int:
         print("⏭️ Chưa có batchChannelConfig — bỏ qua.")
         return 0
     cfg = cfg_snap.to_dict() or {}
-    if not cfg.get("enabled"):
+    if not manual and not cfg.get("enabled"):
         print("⏭️ Batch kênh đang tắt (enabled=false).")
         return 0
 
@@ -325,8 +367,11 @@ def run_batch(*, force: bool = False) -> int:
         print("❌ Config thiếu templateImageUrl / channel / createdBy")
         return 1
 
-    y_date = (_vn_now().date() - timedelta(days=1)).isoformat()
-    if not force:
+    if test_latest and test_latest > 0:
+        y_date = f"test-{_vn_now().date().isoformat()}"
+    else:
+        y_date = (_vn_now().date() - timedelta(days=1)).isoformat()
+    if not force and not manual:
         recent = (
             db.collection(RUNS_COLLECTION)
             .where("dateVN", "==", y_date)
@@ -344,6 +389,8 @@ def run_batch(*, force: bool = False) -> int:
         "dateVN": y_date,
         "channelUsername": username,
         "status": "running",
+        "isManualTest": bool(manual or test_latest),
+        "testLatest": int(test_latest or 0),
         "startedAt": firestore.SERVER_TIMESTAMP,
         "videosFound": 0,
         "ordersCreated": 0,
@@ -356,10 +403,16 @@ def run_batch(*, force: bool = False) -> int:
     orders_created = 0
 
     try:
-        print(f"📡 Lấy video @{username} — ngày hôm qua VN ({y_date})...")
-        all_videos = fetch_channel_videos(username)
-        videos = filter_videos_yesterday(all_videos)
-        print(f"   Tìm thấy {len(videos)} video hôm qua (trong {len(all_videos)} gần nhất).")
+        if test_latest and test_latest > 0:
+            print(f"📡 Lấy {test_latest} video mới nhất @{username} (chạy thử)...")
+            all_videos = fetch_channel_videos(username)
+            videos = all_videos[:test_latest]
+            print(f"   Chọn {len(videos)} video (trong {len(all_videos)} gần nhất).")
+        else:
+            print(f"📡 Lấy video @{username} — ngày hôm qua VN ({y_date})...")
+            all_videos = fetch_channel_videos(username)
+            videos = filter_videos_yesterday(all_videos)
+            print(f"   Tìm thấy {len(videos)} video hôm qua (trong {len(all_videos)} gần nhất).")
         run_ref.update({"videosFound": len(videos)})
 
         for v in videos:
@@ -433,8 +486,23 @@ def run_batch(*, force: bool = False) -> int:
 def main():
     parser = argparse.ArgumentParser(description="Nhay Cloud — batch kênh TikTok")
     parser.add_argument("--force", action="store_true", help="Chạy lại dù đã có run completed hôm qua")
+    parser.add_argument(
+        "--test-latest",
+        type=int,
+        default=0,
+        metavar="N",
+        help="Chạy thử: lấy N video mới nhất thay vì chỉ hôm qua",
+    )
+    parser.add_argument(
+        "--poll-trigger",
+        action="store_true",
+        help="Kiểm tra runNowRequestedAt trên Firestore (cron mỗi phút)",
+    )
     args = parser.parse_args()
-    sys.exit(run_batch(force=args.force))
+    if args.poll_trigger:
+        sys.exit(poll_run_now_trigger())
+    test_latest = args.test_latest if args.test_latest > 0 else None
+    sys.exit(run_batch(force=args.force or bool(test_latest), test_latest=test_latest))
 
 
 if __name__ == "__main__":
