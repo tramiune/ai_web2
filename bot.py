@@ -2414,10 +2414,15 @@ def start_batch_channel_listener():
     """Admin bấm「Chạy thử ngay」trên web → bot chạy batch ngay (không chờ 3h)."""
     doc_ref = db.collection("batchChannelConfig").document("default")
 
-    def on_snapshot(doc_snapshot, changes, read_time):
-        if not doc_snapshot.exists:
+    def on_snapshot(keys, changes, read_time):
+        if not changes:
             return
-        data = doc_snapshot.to_dict() or {}
+        data = {}
+        for change in changes:
+            doc = change.document
+            if getattr(doc, "exists", False):
+                data = doc.to_dict() or {}
+            break
         requested = data.get("runNowRequestedAt")
         if not requested:
             return
