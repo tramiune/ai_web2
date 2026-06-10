@@ -56,6 +56,15 @@ export const ADMIN_EMAILS = ["traderfinn0312@gmail.com", "dinhhoangvan.hh@gmail.
  *       allow write: if isAdmin();
  *     }
  *
+ *     // Xây kênh tự động (batch channel)
+ *     match /batchChannelConfig/{docId} {
+ *       allow read, write: if isAdmin();
+ *     }
+ *     match /batchChannelRuns/{runId} {
+ *       allow read: if isAdmin();
+ *       allow create, update, delete: if false;
+ *     }
+ *
  *     // (Tuỳ chọn) settings/render — UI hiện dùng bots/nhaycloud_vps_bot thay vì doc này
  *     match /settings/{docId} {
  *       allow read: if request.auth != null && isAdmin();
