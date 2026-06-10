@@ -5723,14 +5723,24 @@ function renderBatchChannelRuns(rows) {
         tbody.innerHTML = `<tr><td colspan="4" style="text-align:center; opacity:0.5; padding:2rem;">${t('build_channel.runs_empty')}</td></tr>`;
         return;
     }
-    tbody.innerHTML = rows.map((r) => `
+    tbody.innerHTML = rows.map((r) => {
+        const errs = Array.isArray(r.errors) ? r.errors.filter(Boolean) : [];
+        const errText = errs.length ? errs[errs.length - 1] : '';
+        const items = Array.isArray(r.items) ? r.items : [];
+        const orderIds = items.map((it) => it.orderId).filter(Boolean);
+        const statusExtra = errText
+            ? `<div style="font-size:0.75rem;color:#ff6b6b;margin-top:0.25rem;">${escapeHTML(errText)}</div>`
+            : (orderIds.length
+                ? `<div style="font-size:0.75rem;opacity:0.7;margin-top:0.25rem;">Đơn: ${orderIds.map((id) => `<a href="#" onclick="event.preventDefault();window.navTo('admin-panel');window.openAdminDetail('${escapeHTML(id)}')" style="color:#ffde00;">#${escapeHTML(id.slice(-6).toUpperCase())}</a>`).join(', ')}</div>`
+                : '');
+        return `
         <tr>
             <td>${escapeHTML(r.dateVN || '—')}</td>
             <td>${Number(r.videosFound) || 0}</td>
             <td>${Number(r.ordersCreated) || 0}</td>
-            <td>${escapeHTML(r.status || '—')}</td>
-        </tr>
-    `).join('');
+            <td>${escapeHTML(r.status || '—')}${statusExtra}</td>
+        </tr>`;
+    }).join('');
 }
 
 async function loadBatchChannelPage() {

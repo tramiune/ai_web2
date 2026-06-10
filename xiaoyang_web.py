@@ -210,15 +210,17 @@ class XiaoyangWebClient:
             raise XiaoyangWebError("Thiếu XIAOYANG_WARDROBE_MODAL_KEY trong .env")
         option_key = (option_key or get_env("XIAOYANG_WARDROBE_OPTION_KEY") or "default").strip()
         wardrobe_replace = (wardrobe_replace or get_env("XIAOYANG_WARDROBE_REPLACE") or "full").strip()
-        prompt = (prompt or get_env("XIAOYANG_WARDROBE_PROMPT") or "Keep pose and background").strip()
+        prompt = (prompt or get_env("XIAOYANG_WARDROBE_PROMPT") or "").strip()
         body = {
             "modal_key": modal_key,
             "option_key": option_key,
-            "prompt": prompt,
             "image_token": image_token,
             "clothes_image_token": clothes_image_token,
             "wardrobe_replace": wardrobe_replace,
         }
+        # ai_wardrobe không nhận prompt — gửi sẽ 400 E_PROMPT_NOT_ALLOWED
+        if prompt:
+            body["prompt"] = prompt
         return self._request(
             "POST",
             "/api/tasks",
