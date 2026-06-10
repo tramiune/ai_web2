@@ -2377,6 +2377,60 @@ def _rescan_pending_orders_loop():
         time.sleep(SESSION_ERROR_BACKOFF_SEC)
         _enqueue_pending_rescan()
 
+
+_batch_channel_trigger_lock = threading.Lock()
+_batch_channel_trigger_running = False
+
+
+def _firestore_ts_seconds(ts) -> float:
+    if ts is None:
+        return 0.0
+    if hasattr(ts, "timestamp"):
+        return float(ts.timestamp())
+    try:
+        return float(ts)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _run_batch_channel_trigger():
+    global _batch_channel_trigger_running
+    with _batch_channel_trigger_lock:
+        if _batch_channel_trigger_running:
+            return
+        _batch_channel_trigger_running = True
+    try:
+        from batch_channel import poll_run_now_trigger
+
+        poll_run_now_trigger()
+    except Exception as e:
+        print(f"⚠️ batch channel「Chạy thử ngay」: {e}")
+    finally:
+        with _batch_channel_trigger_lock:
+            _batch_channel_trigger_running = False
+
+
+def start_batch_channel_listener():
+    """Admin bấm「Chạy thử ngay」trên web → bot chạy batch ngay (không chờ 3h)."""
+    doc_ref = db.collection("batchChannelConfig").document("default")
+
+    def on_snapshot(doc_snapshot, changes, read_time):
+        if not doc_snapshot.exists:
+            return
+        data = doc_snapshot.to_dict() or {}
+        requested = data.get("runNowRequestedAt")
+        if not requested:
+            return
+        handled = data.get("runNowHandledAt")
+        if _firestore_ts_seconds(handled) >= _firestore_ts_seconds(requested):
+            return
+        print("🚀 batch channel — nhận lệnh「Chạy thử ngay」từ web")
+        threading.Thread(target=_run_batch_channel_trigger, daemon=True).start()
+
+    doc_ref.on_snapshot(on_snapshot)
+    print("👂 Lắng nghe batchChannelConfig — nút「Chạy thử ngay」trên web")
+
+
 def start_bot():
     global BOT_NAME
     parser = argparse.ArgumentParser(description='Wallpaper/Nhay Cloud order bot — aidancing.net')
@@ -2402,6 +2456,7 @@ def start_bot():
     start_bot_control_listener()
     start_render_provider_listener()
     start_processing_listener()
+    start_batch_channel_listener()
 
     if use_api_mode():
         try:
