@@ -6,4 +6,4 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 mkdir -p logs
 export PYTHONUNBUFFERED=1
-python3 batch_channel.py --poll-trigger
+exec python3 batch_channel.py --poll-trigger

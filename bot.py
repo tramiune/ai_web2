@@ -2400,9 +2400,21 @@ def _run_batch_channel_trigger():
             return
         _batch_channel_trigger_running = True
     try:
-        from batch_channel import poll_run_now_trigger
+        import subprocess
 
-        poll_run_now_trigger()
+        root = os.path.dirname(os.path.abspath(__file__))
+        proc = subprocess.run(
+            [sys.executable, os.path.join(root, "batch_channel.py"), "--poll-trigger"],
+            cwd=root,
+            capture_output=True,
+            text=True,
+            timeout=7200,
+        )
+        if proc.stdout:
+            print(proc.stdout.rstrip())
+        if proc.returncode != 0:
+            err = (proc.stderr or proc.stdout or "").strip()
+            print(f"⚠️ batch channel「Chạy thử ngay」exit {proc.returncode}: {err[:500]}")
     except Exception as e:
         print(f"⚠️ batch channel「Chạy thử ngay」: {e}")
     finally:
