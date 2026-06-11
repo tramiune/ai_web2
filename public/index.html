@@ -621,6 +621,11 @@
                 <div id="batch-channel-tiktok-wrap">
                     <label style="display:block; font-size:0.85rem; opacity:0.7; margin-bottom:0.4rem;" data-i18n="build_channel.channel_label">Link kênh TikTok</label>
                     <input type="url" id="batch-channel-url" class="form-control" placeholder="https://www.tiktok.com/@username" data-i18n="build_channel.channel_placeholder">
+                    <div style="margin-top:0.75rem;">
+                        <label style="display:block; font-size:0.85rem; opacity:0.7; margin-bottom:0.4rem;" data-i18n="build_channel.yesterday_count_label">Số video hôm qua</label>
+                        <input type="number" id="batch-yesterday-count" class="form-control" min="0" max="50" value="0" style="width:120px;">
+                        <p style="margin:0.35rem 0 0; font-size:0.78rem; opacity:0.6;" data-i18n="build_channel.yesterday_count_hint">0 = tất cả video đăng hôm qua. Cron + Làm ngay dùng giá trị này (ưu tiên video mới hơn).</p>
+                    </div>
                 </div>
                 <div id="batch-channel-orders-wrap" style="display:none;">
                     <label style="display:block; font-size:0.85rem; opacity:0.7; margin-bottom:0.4rem;" data-i18n="build_channel.orders_pick_label">Chọn đơn nguồn (đã có ảnh + video)</label>

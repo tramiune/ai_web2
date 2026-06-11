@@ -119,6 +119,26 @@ def filter_videos_yesterday(videos: list[dict]) -> list[dict]:
     return out
 
 
+def _yesterday_video_limit(cfg: dict | None) -> int:
+    if not cfg:
+        return 0
+    try:
+        return max(0, int(cfg.get("yesterdayVideoCount") or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def apply_yesterday_video_limit(videos: list[dict], cfg: dict | None) -> list[dict]:
+    """Giới hạn số video hôm qua (0 = tất cả). Ưu tiên video mới hơn trong ngày."""
+    if not videos:
+        return videos
+    limit = _yesterday_video_limit(cfg)
+    ordered = sorted(videos, key=lambda v: int(v.get("create_time") or 0), reverse=True)
+    if limit > 0:
+        return ordered[:limit]
+    return ordered
+
+
 def _xiaoyang_account_id(email: str) -> str:
     return re.sub(r"[^a-z0-9_-]", "_", (email or "default").split("@")[0].lower())
 
@@ -536,6 +556,7 @@ def run_batch(
         "status": "running",
         "isManualTest": bool(manual or test_latest),
         "testLatest": int(test_latest or 0),
+        "yesterdayVideoCount": _yesterday_video_limit(cfg),
         "startedAt": firestore.SERVER_TIMESTAMP,
         "videosFound": 0,
         "ordersCreated": 0,
@@ -601,8 +622,16 @@ def run_batch(
             else:
                 print(f"📡 Lấy video @{username} — ngày hôm qua VN ({y_date})...")
                 all_videos = fetch_channel_videos(username)
-                videos = filter_videos_yesterday(all_videos)
-                print(f"   Tìm thấy {len(videos)} video hôm qua (trong {len(all_videos)} gần nhất).")
+                yesterday_all = filter_videos_yesterday(all_videos)
+                videos = apply_yesterday_video_limit(yesterday_all, cfg)
+                limit = _yesterday_video_limit(cfg)
+                if limit > 0:
+                    print(
+                        f"   Chọn {len(videos)}/{len(yesterday_all)} video hôm qua "
+                        f"(giới hạn {limit}, trong {len(all_videos)} gần nhất)."
+                    )
+                else:
+                    print(f"   Tìm thấy {len(videos)} video hôm qua (trong {len(all_videos)} gần nhất).")
             run_ref.update({"videosFound": len(videos)})
 
             for v in videos:

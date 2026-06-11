@@ -5695,6 +5695,12 @@ function getBatchSourceModeFromUI() {
     return orders?.checked ? 'orders' : 'tiktok';
 }
 
+function getBatchYesterdayVideoCount() {
+    const raw = parseInt(document.getElementById('batch-yesterday-count')?.value, 10);
+    if (!Number.isFinite(raw) || raw <= 0) return 0;
+    return Math.max(0, Math.min(50, raw));
+}
+
 function syncBatchSourceModeUI(mode) {
     const m = mode === 'orders' ? 'orders' : 'tiktok';
     const tiktokRadio = document.getElementById('batch-source-tiktok');
@@ -5841,6 +5847,10 @@ async function loadBatchChannelPage() {
         if (cronInput && cfg?.cronHour != null) {
             cronInput.value = String(cfg.cronHour);
         }
+        const yesterdayInput = document.getElementById('batch-yesterday-count');
+        if (yesterdayInput && cfg?.yesterdayVideoCount != null) {
+            yesterdayInput.value = String(cfg.yesterdayVideoCount);
+        }
         syncBatchSourceModeUI(cfg?.sourceMode || 'tiktok');
         const preview = document.getElementById('batch-template-preview');
         if (preview && cfg?.templateImageUrl) {
@@ -5921,6 +5931,7 @@ window.saveBatchChannelConfig = async (enable) => {
     const cronHour = Number.isFinite(cronHourRaw) ? Math.max(0, Math.min(23, cronHourRaw)) : 3;
     const sourceMode = getBatchSourceModeFromUI();
     const selectedOrderIds = getBatchSelectedOrderIds();
+    const yesterdayVideoCount = getBatchYesterdayVideoCount();
 
     const payload = {
         enabled: !!enable,
@@ -5929,6 +5940,7 @@ window.saveBatchChannelConfig = async (enable) => {
         templateImageUrl: templateImageUrl,
         sourceMode,
         cronHour,
+        yesterdayVideoCount,
         wardrobeReplace: 'full',
         frameSec: 2.5,
         selectedOrderIds,
@@ -5990,6 +6002,7 @@ async function _prepareBatchChannelTriggerPayload() {
 
     const cronHourRaw = parseInt(document.getElementById('batch-cron-hour')?.value, 10);
     const cronHour = Number.isFinite(cronHourRaw) ? Math.max(0, Math.min(23, cronHourRaw)) : 3;
+    const yesterdayVideoCount = getBatchYesterdayVideoCount();
 
     return {
         channelUrl,
@@ -5997,6 +6010,7 @@ async function _prepareBatchChannelTriggerPayload() {
         templateImageUrl,
         sourceMode,
         cronHour,
+        yesterdayVideoCount,
         wardrobeReplace: 'full',
         frameSec: 2.5,
         selectedOrderIds,
