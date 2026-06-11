@@ -224,21 +224,50 @@ def poll_xy_task(client, task_id: str, *, label: str, timeout_sec: int = 1800) -
     raise TimeoutError(f"task {task_id} timeout")
 
 
+def _wardrobe_replace_mode(cfg: dict | None = None) -> str:
+    if cfg:
+        mode = (cfg.get("wardrobeReplace") or "").strip()
+        if mode:
+            return mode
+    return (get_env("XIAOYANG_WARDROBE_REPLACE") or "full").strip() or "full"
+
+
+def _frame_seconds(cfg: dict | None = None) -> list[float]:
+    """Ưu tiên frame muộn hơn để bắt cả áo + quần/váy (tránh chỉ thấy áo)."""
+    base = 2.5
+    if cfg:
+        try:
+            base = float(cfg.get("frameSec") or base)
+        except (TypeError, ValueError):
+            pass
+    candidates = [base, base + 1.0, max(1.0, base - 0.5), 3.5]
+    seen: set[float] = set()
+    out: list[float] = []
+    for s in candidates:
+        k = round(s, 2)
+        if k not in seen:
+            seen.add(k)
+            out.append(k)
+    return out
+
+
 def run_wardrobe_web(
     client: XiaoyangWebClient,
     template_url: str,
     clothes_path: str,
     *,
     tmp: str,
+    wardrobe_replace: str = "full",
 ) -> str:
     template_path = os.path.join(tmp, "batch_template.png")
     download_file(template_url, template_path, referer="https://nhay.cloud/")
-    print("👗 Thay đồ XiaoYang (web session)...")
+    print(f"👗 Thay đồ XiaoYang (wardrobe_replace={wardrobe_replace})...")
     image_token = client.upload_file(template_path)
     clothes_token = client.upload_file(clothes_path)
     resp = client.create_wardrobe_task(
         image_token=image_token,
         clothes_image_token=clothes_token,
+        wardrobe_replace=wardrobe_replace,
     )
     task_id = str(resp.get("task_id") or "").strip()
     if not task_id:
@@ -261,10 +290,11 @@ def create_batch_order(
     char_url: str,
     video_url: str,
     batch_run_id: str,
-    source_video_id: str,
+    source_video_id: str = "",
+    source_order_id: str = "",
 ) -> str:
     ref = db.collection("orders").document()
-    ref.set({
+    payload = {
         "userId": admin_uid,
         "userEmail": admin_email or "",
         "userName": admin_name or "Admin",
@@ -281,11 +311,76 @@ def create_batch_order(
         "adminNote": "batch-channel",
         "isBatchChannel": True,
         "batchChannelRunId": batch_run_id,
-        "batchSourceVideoId": source_video_id,
         "createdAt": firestore.SERVER_TIMESTAMP,
         "updatedAt": firestore.SERVER_TIMESTAMP,
-    })
+    }
+    if source_video_id:
+        payload["batchSourceVideoId"] = source_video_id
+    if source_order_id:
+        payload["batchSourceOrderId"] = source_order_id
+    ref.set(payload)
     return ref.id
+
+
+def _extract_outfit_frame(video_path: str, tmp: str, vid_key: str, cfg: dict) -> str:
+    last_err: Exception | None = None
+    for sec in _frame_seconds(cfg):
+        frame_local = os.path.join(tmp, f"{vid_key}_t{sec}.png")
+        try:
+            extract_frame_at_sec(video_path, frame_local, sec)
+            print(f"   🖼️ Frame t={sec}s")
+            return frame_local
+        except Exception as e:
+            last_err = e
+    raise RuntimeError(f"frame_extract_failed: {last_err}")
+
+
+def _process_video_item(
+    xy_client: XiaoyangWebClient,
+    db,
+    *,
+    cfg: dict,
+    template_url: str,
+    admin_uid: str,
+    admin_email: str,
+    admin_name: str,
+    run_ref,
+    video_url: str,
+    item_key: str,
+    source_video_id: str = "",
+    source_order_id: str = "",
+    referer: str = "https://www.tiktok.com/",
+) -> dict:
+    wardrobe_mode = _wardrobe_replace_mode(cfg)
+    item = {"videoId": item_key, "status": "pending", "orderId": ""}
+    if source_order_id:
+        item["sourceOrderId"] = source_order_id
+    with tempfile.TemporaryDirectory(prefix="batch_ch_") as tmp:
+        video_local = os.path.join(tmp, f"{item_key}.mp4")
+        print(f"▶️ Nguồn {item_key}...")
+        download_file(video_url, video_local, referer=referer)
+        frame_local = _extract_outfit_frame(video_local, tmp, item_key, cfg)
+        char_url = run_wardrobe_web(
+            xy_client, template_url, frame_local, tmp=tmp, wardrobe_replace=wardrobe_mode,
+        )
+        motion_url = upload_motion_video(video_local)
+        order_id = create_batch_order(
+            db,
+            admin_uid=admin_uid,
+            admin_email=admin_email,
+            admin_name=admin_name,
+            char_url=char_url,
+            video_url=motion_url,
+            batch_run_id=run_ref.id,
+            source_video_id=source_video_id,
+            source_order_id=source_order_id,
+        )
+        item["status"] = "order_created"
+        item["orderId"] = order_id
+        item["characterImageLink"] = char_url
+        item["referenceVideoLink"] = motion_url
+        print(f"   ✅ Đơn {order_id}")
+    return item
 
 
 def upload_motion_video(local_path: str) -> str:
@@ -332,12 +427,57 @@ def poll_run_now_trigger() -> int:
     if any(True for _ in running):
         print("⏳ Batch đang chạy — bỏ qua trigger mới.")
         return 0
+    mode = (cfg.get("runNowMode") or "test").strip().lower()
     cfg_ref.update({"runNowHandledAt": requested})
-    print("🚀 Trigger「Chạy thử ngay」từ web — test 1 video mới nhất.")
+    order_ids = [str(x).strip() for x in (cfg.get("selectedOrderIds") or []) if str(x).strip()]
+    if mode == "orders":
+        print(f"🚀 Trigger「Làm ngay / copy đơn」— {len(order_ids)} đơn.")
+        return run_batch(force=True, manual=True, source_mode="orders", order_ids=order_ids)
+    if mode == "full":
+        print("🚀 Trigger「Làm ngay」— batch đầy đủ (video hôm qua).")
+        return run_batch(force=True, manual=True)
+    print("🚀 Trigger「Chạy thử」— 1 video mới nhất.")
     return run_batch(force=True, test_latest=1, manual=True)
 
 
-def run_batch(*, force: bool = False, test_latest: int | None = None, manual: bool = False) -> int:
+def run_daily_hourly() -> int:
+    """Cron mỗi giờ — chạy khi đúng cronHour (VN) và enabled."""
+    if not firebase_admin._apps:
+        cred = credentials.Certificate(str(ROOT / "serviceAccountKey.json"))
+        firebase_admin.initialize_app(cred)
+    db = firestore.client()
+    cfg_ref = db.collection(CONFIG_COLLECTION).document(CONFIG_DOC)
+    cfg_snap = cfg_ref.get()
+    if not cfg_snap.exists:
+        return 0
+    cfg = cfg_snap.to_dict() or {}
+    if not cfg.get("enabled"):
+        return 0
+    try:
+        cron_hour = int(cfg.get("cronHour") if cfg.get("cronHour") is not None else 3)
+    except (TypeError, ValueError):
+        cron_hour = 3
+    cron_hour = max(0, min(23, cron_hour))
+    if _vn_now().hour != cron_hour:
+        return 0
+    y_date = (_vn_now().date() - timedelta(days=1)).isoformat()
+    if cfg.get("lastDailyCronDateVN") == y_date:
+        return 0
+    print(f"⏰ Cron batch kênh — {cron_hour}:00 VN, ngày video {y_date}")
+    rc = run_batch(force=False, manual=False)
+    if rc == 0:
+        cfg_ref.update({"lastDailyCronDateVN": y_date})
+    return rc
+
+
+def run_batch(
+    *,
+    force: bool = False,
+    test_latest: int | None = None,
+    manual: bool = False,
+    source_mode: str | None = None,
+    order_ids: list[str] | None = None,
+) -> int:
     if not firebase_admin._apps:
         cred = credentials.Certificate(str(ROOT / "serviceAccountKey.json"))
         firebase_admin.initialize_app(cred)
@@ -363,8 +503,12 @@ def run_batch(*, force: bool = False, test_latest: int | None = None, manual: bo
     admin_uid = (cfg.get("createdBy") or "").strip()
     admin_email = (cfg.get("createdByEmail") or "").strip()
     admin_name = (cfg.get("createdByName") or "Admin").strip()
-    if not template_url or not channel or not admin_uid:
-        print("❌ Config thiếu templateImageUrl / channel / createdBy")
+    source_mode = (source_mode or cfg.get("sourceMode") or "tiktok").strip().lower()
+    if not template_url or not admin_uid:
+        print("❌ Config thiếu templateImageUrl / createdBy")
+        return 1
+    if source_mode != "orders" and not channel:
+        print("❌ Config thiếu channel (chế độ TikTok)")
         return 1
 
     if test_latest and test_latest > 0:
@@ -383,11 +527,12 @@ def run_batch(*, force: bool = False, test_latest: int | None = None, manual: bo
             print(f"⏭️ Đã chạy batch cho ngày {y_date}.")
             return 0
 
-    username = parse_tiktok_username(channel)
+    username = parse_tiktok_username(channel) if channel else ""
     run_ref = db.collection(RUNS_COLLECTION).document()
     run_ref.set({
         "dateVN": y_date,
         "channelUsername": username,
+        "sourceMode": source_mode,
         "status": "running",
         "isManualTest": bool(manual or test_latest),
         "testLatest": int(test_latest or 0),
@@ -403,56 +548,90 @@ def run_batch(*, force: bool = False, test_latest: int | None = None, manual: bo
     orders_created = 0
 
     try:
-        if test_latest and test_latest > 0:
-            print(f"📡 Lấy {test_latest} video mới nhất @{username} (chạy thử)...")
-            all_videos = fetch_channel_videos(username)
-            videos = all_videos[:test_latest]
-            print(f"   Chọn {len(videos)} video (trong {len(all_videos)} gần nhất).")
-        else:
-            print(f"📡 Lấy video @{username} — ngày hôm qua VN ({y_date})...")
-            all_videos = fetch_channel_videos(username)
-            videos = filter_videos_yesterday(all_videos)
-            print(f"   Tìm thấy {len(videos)} video hôm qua (trong {len(all_videos)} gần nhất).")
-        run_ref.update({"videosFound": len(videos)})
-
-        for v in videos:
-            vid = str(v.get("video_id") or "")
-            play = v.get("hdplay") or v.get("play") or ""
-            if not vid or not play:
-                errors.append(f"{vid or '?'}: no_play_url")
-                continue
-            item = {"videoId": vid, "status": "pending", "orderId": ""}
-            try:
-                with tempfile.TemporaryDirectory(prefix="batch_ch_") as tmp:
-                    video_local = os.path.join(tmp, f"{vid}.mp4")
-                    frame_local = os.path.join(tmp, f"{vid}_t1.png")
-                    print(f"▶️ Video {vid}...")
-                    download_video(play, video_local)
-                    extract_frame_at_sec(video_local, frame_local, 1.0)
-                    char_url = run_wardrobe_web(xy_client, template_url, frame_local, tmp=tmp)
-                    motion_url = upload_motion_video(video_local)
-                    order_id = create_batch_order(
-                        db,
+        if source_mode == "orders":
+            ids = order_ids if order_ids is not None else [
+                str(x).strip() for x in (cfg.get("selectedOrderIds") or []) if str(x).strip()
+            ]
+            if not ids:
+                raise RuntimeError("Chưa chọn đơn nguồn (selectedOrderIds)")
+            print(f"📋 Copy {len(ids)} đơn có ảnh + video...")
+            run_ref.update({"videosFound": len(ids)})
+            for oid in ids:
+                snap = db.collection("orders").document(oid).get()
+                if not snap.exists:
+                    errors.append(f"{oid}: not_found")
+                    items.append({"videoId": oid, "status": "error", "error": "not_found", "orderId": ""})
+                    run_ref.update({"items": items, "ordersCreated": orders_created, "errors": errors})
+                    continue
+                od = snap.to_dict() or {}
+                video_url = (od.get("referenceVideoLink") or "").strip()
+                if not video_url:
+                    errors.append(f"{oid}: no_reference_video")
+                    items.append({"videoId": oid, "status": "error", "error": "no_reference_video", "orderId": ""})
+                    run_ref.update({"items": items, "ordersCreated": orders_created, "errors": errors})
+                    continue
+                try:
+                    item = _process_video_item(
+                        xy_client, db,
+                        cfg=cfg,
+                        template_url=template_url,
                         admin_uid=admin_uid,
                         admin_email=admin_email,
                         admin_name=admin_name,
-                        char_url=char_url,
-                        video_url=motion_url,
-                        batch_run_id=run_ref.id,
+                        run_ref=run_ref,
+                        video_url=video_url,
+                        item_key=oid[-8:],
+                        source_order_id=oid,
+                        referer="https://nhay.cloud/",
+                    )
+                    orders_created += 1
+                except Exception as e:
+                    msg = f"{oid}: {e}"
+                    print(f"   ❌ {msg}")
+                    errors.append(msg)
+                    item = {"videoId": oid, "sourceOrderId": oid, "status": "error", "error": str(e), "orderId": ""}
+                items.append(item)
+                run_ref.update({"items": items, "ordersCreated": orders_created, "errors": errors})
+        else:
+            if test_latest and test_latest > 0:
+                print(f"📡 Lấy {test_latest} video mới nhất @{username} (chạy thử)...")
+                all_videos = fetch_channel_videos(username)
+                videos = all_videos[:test_latest]
+                print(f"   Chọn {len(videos)} video (trong {len(all_videos)} gần nhất).")
+            else:
+                print(f"📡 Lấy video @{username} — ngày hôm qua VN ({y_date})...")
+                all_videos = fetch_channel_videos(username)
+                videos = filter_videos_yesterday(all_videos)
+                print(f"   Tìm thấy {len(videos)} video hôm qua (trong {len(all_videos)} gần nhất).")
+            run_ref.update({"videosFound": len(videos)})
+
+            for v in videos:
+                vid = str(v.get("video_id") or "")
+                play = v.get("hdplay") or v.get("play") or ""
+                if not vid or not play:
+                    errors.append(f"{vid or '?'}: no_play_url")
+                    continue
+                try:
+                    item = _process_video_item(
+                        xy_client, db,
+                        cfg=cfg,
+                        template_url=template_url,
+                        admin_uid=admin_uid,
+                        admin_email=admin_email,
+                        admin_name=admin_name,
+                        run_ref=run_ref,
+                        video_url=play,
+                        item_key=vid,
                         source_video_id=vid,
                     )
-                    item["status"] = "order_created"
-                    item["orderId"] = order_id
                     orders_created += 1
-                    print(f"   ✅ Đơn {order_id}")
-            except Exception as e:
-                msg = f"{vid}: {e}"
-                print(f"   ❌ {msg}")
-                errors.append(msg)
-                item["status"] = "error"
-                item["error"] = str(e)
-            items.append(item)
-            run_ref.update({"items": items, "ordersCreated": orders_created, "errors": errors})
+                except Exception as e:
+                    msg = f"{vid}: {e}"
+                    print(f"   ❌ {msg}")
+                    errors.append(msg)
+                    item = {"videoId": vid, "status": "error", "error": str(e), "orderId": ""}
+                items.append(item)
+                run_ref.update({"items": items, "ordersCreated": orders_created, "errors": errors})
 
         run_ref.update({
             "status": "completed",
@@ -498,9 +677,16 @@ def main():
         action="store_true",
         help="Kiểm tra runNowRequestedAt trên Firestore (cron mỗi phút)",
     )
+    parser.add_argument(
+        "--daily-hourly",
+        action="store_true",
+        help="Cron mỗi giờ — chạy khi đúng cronHour trong batchChannelConfig",
+    )
     args = parser.parse_args()
     if args.poll_trigger:
         sys.exit(poll_run_now_trigger())
+    if args.daily_hourly:
+        sys.exit(run_daily_hourly())
     test_latest = args.test_latest if args.test_latest > 0 else None
     sys.exit(run_batch(force=args.force or bool(test_latest), test_latest=test_latest))
 
