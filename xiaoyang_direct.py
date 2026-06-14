@@ -248,6 +248,7 @@ def r2_direct_configured() -> bool:
     return all(os.environ.get(k, "").strip() for k in keys)
 
 
+
 def _upload_via_motion_worker(file_path: str, object_key: str, content_type: str) -> str | None:
     from xiaoyang_media import WORKER_BASE
 

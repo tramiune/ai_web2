@@ -139,7 +139,7 @@ class VideoAiEasyClient:
     def _clear_session(self) -> None:
         try:
             self.session.cookies.clear(domain="videoaieasy.hdgr.online", path="/", name=AUTH_COOKIE)
-        except TypeError:
+        except (TypeError, KeyError):
             try:
                 del self.session.cookies[AUTH_COOKIE]
             except KeyError:
