@@ -29,6 +29,8 @@ from videoaieasy_web import (
     VideoAiEasyError,
     MODEL_KLING_26,
     MODEL_KLING_30,
+    prepare_character_image_for_vae,
+    resolution_for_order,
 )
 
 # --- CONFIGURATION ---
@@ -1877,6 +1879,8 @@ def submit_to_videoaieasy(order_id, account):
 
             char_path = None
             vid_path = None
+            vae_char_path = None
+            vae_char_tmp = False
             try:
                 model_id = _videoaieasy_model_for_order(data)
                 tier = "Kling 3.0" if model_id == MODEL_KLING_30 else "Kling 2.6"
@@ -1899,8 +1903,12 @@ def submit_to_videoaieasy(order_id, account):
                     time.sleep(2)
                 if not char_path or not vid_path:
                     raise VideoAiEasyError("Không tải được ảnh/video từ link đơn hàng")
+                aspect = (data.get("aspectRatio") or "").strip() or "9:16"
+                vae_char_path, vae_char_tmp = prepare_character_image_for_vae(
+                    char_path, aspect_ratio=aspect
+                )
                 print("📤 Upload ảnh lên videoaieasy.hdgr.online...")
-                image_url = api.upload_file(char_path, kind="image")
+                image_url = api.upload_file(vae_char_path, kind="image")
                 print("📤 Upload video motion...")
                 video_url = api.upload_file(vid_path, kind="video")
                 job_id = api.create_motion_job(
@@ -1908,6 +1916,7 @@ def submit_to_videoaieasy(order_id, account):
                     driving_video_url=video_url,
                     prompt=prompt,
                     model_id=model_id,
+                    resolution=resolution_for_order(data),
                 )
                 print(f"🆔 [VideoAiEasy/{nick_label}] job: {job_id}")
                 _mark_order_processing(
@@ -1941,6 +1950,8 @@ def submit_to_videoaieasy(order_id, account):
                 )
                 success = False
             finally:
+                if vae_char_tmp and vae_char_path and os.path.exists(vae_char_path):
+                    os.remove(vae_char_path)
                 if char_path and os.path.exists(char_path):
                     os.remove(char_path)
                 if vid_path and os.path.exists(vid_path):
