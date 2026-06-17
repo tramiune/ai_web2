@@ -2272,14 +2272,17 @@ function updateFirstOrderUI() {
     dailyPromoRemaining = promo.remainingToday;
 
     const modelGroupEl = document.getElementById('model-selection-group');
-    if (modelGroupEl) modelGroupEl.style.display = 'block';
+    if (modelGroupEl) modelGroupEl.style.display = promo.canUsePromo ? 'none' : 'block';
+
+    const fastRadio = document.querySelector('input[name="model-type"][value="fast"]');
+    if (promo.canUsePromo && fastRadio) fastRadio.checked = true;
 
     if (costEl) {
         const submitBtn = document.getElementById('order-submit-btn');
         const submitText = submitBtn ? submitBtn.querySelector('[data-i18n="hero.cta_create"]') : null;
         const summaryEl = document.getElementById('submit-summary-line');
         const checkedModel = document.querySelector('input[name="model-type"]:checked');
-        const modelKey = checkedModel ? checkedModel.value : 'fast';
+        const modelKey = promo.canUsePromo ? 'fast' : (checkedModel ? checkedModel.value : 'fast');
         const baseCost = localizedModel(modelKey)?.cost ?? 10;
 
         costEl.innerText = promo.canUsePromo ? String(DAILY_PROMO_COST) : String(baseCost);
@@ -2290,7 +2293,12 @@ function updateFirstOrderUI() {
                 : t('hero.cta_create');
         }
         if (summaryEl) {
-            summaryEl.innerText = t(`modals.model_${modelKey}_desc`);
+            summaryEl.innerText = promo.canUsePromo
+                ? t('dashboard.daily_promo_summary', {
+                    remaining: promo.remainingTotal,
+                    max: DAILY_PROMO_MAX_TOTAL
+                })
+                : t(`modals.model_${modelKey}_desc`);
             summaryEl.style.color = '';
         }
     }
@@ -2936,7 +2944,10 @@ async function setupEventListeners() {
                 let videoFile = document.getElementById('file-video')?.files?.[0];
                 const templateUrl = document.getElementById('selected-template-url')?.value || '';
                 const tiktokUrl = document.getElementById('tiktok-video-url')?.value?.trim() || '';
-                const modelKeySelected = document.querySelector('input[name="model-type"]:checked')?.value || 'fast';
+                const promoAtSubmit = getDailyPromoStatus(FB_CACHE.myOrders || [], FB_CACHE.userProfile);
+                const modelKeySelected = promoAtSubmit.canUsePromo
+                    ? 'fast'
+                    : (document.querySelector('input[name="model-type"]:checked')?.value || 'fast');
                 const serviceType = document.querySelector('input[name="service-type"]:checked')?.value || 'motion-to-char';
                 let modelIdOverride = null;
 
