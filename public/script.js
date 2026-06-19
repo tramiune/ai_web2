@@ -33,7 +33,7 @@ const AI_MODELS = [
         id: 'copy-motion-photo',
         titleKey: 'models.model1_title',
         descKey: 'models.model1_desc',
-        cost: 4,
+        cost: 15,
         serviceType: 'motion-to-char',
         demoChar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=300',
         demoRef: 'https://pub-2b53cd37b4a44642afdbb8bb470bde66.r2.dev/banner.mp4',
@@ -2270,7 +2270,12 @@ window.selectTopup = async (id) => {
 
 window.openOrderModal = () => {
     if (blockIfUpgradeMaintenance()) return;
-    updateFirstOrderUI();
+    const promo = getDailyPromoStatus(FB_CACHE.myOrders || [], FB_CACHE.userProfile);
+    if (promo.canUsePromo) {
+        updateFirstOrderUI();
+    } else {
+        selectDefaultModel('quality');
+    }
     window.switchVideoSource('upload');
     window.openModal('order-modal');
 
@@ -3058,7 +3063,7 @@ async function setupEventListeners() {
                     if (!userDoc.exists()) throw t('common.error');
 
                     const modelKey = modelKeySelected;
-                    const baseModel = localizedModel(modelKey) || localizedModel('fast');
+                    const baseModel = localizedModel(modelKey) || localizedModel('quality');
                     let model = { ...baseModel };
                     if (modelIdOverride) model.modelId = modelIdOverride;
 
@@ -3123,7 +3128,7 @@ async function setupEventListeners() {
                                 if (!userDoc.exists()) throw t('common.error');
 
                                 const modelKey = modelKeySelected;
-                                const baseModel = localizedModel(modelKey) || localizedModel('fast');
+                                const baseModel = localizedModel(modelKey) || localizedModel('quality');
                                 let orderModel = { ...baseModel };
                                 if (modelIdOverride) orderModel.modelId = modelIdOverride;
 
