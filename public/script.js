@@ -2,6 +2,10 @@
  * script.js - Core logic for Nhay Cloud
  */
 
+import { APP_CLIENT_VERSION } from "./app-version.js";
+
+export { APP_CLIENT_VERSION };
+
 const TELEGRAM_BOT_TOKEN = '8855918099:AAHmPUWTe6_dicXyh0nseADQomVv6MGKjGQ';
 const TELEGRAM_CHAT_ID = '6067707939';
 
@@ -641,6 +645,41 @@ function clearPendingReferralCode() {
     try { localStorage.removeItem(REFERRAL_STORAGE_KEY); } catch (e) { }
 }
 
+function isClientOlderThan(clientVer, minVer) {
+    const a = Number(clientVer) || 0;
+    const b = Number(minVer) || 0;
+    return a < b;
+}
+
+async function ensureClientVersionGate() {
+    let minVer = APP_CLIENT_VERSION;
+    try {
+        const { db, doc, getDoc } = window.firebase;
+        const snap = await getDoc(doc(db, 'settings', 'client'));
+        if (snap.exists() && snap.data().minClientVersion != null) {
+            minVer = Number(snap.data().minClientVersion);
+        }
+    } catch (e) {
+        console.warn('[clientVersion] settings/client:', e);
+    }
+    window.__minClientVersion = minVer;
+    if (!isClientOlderThan(APP_CLIENT_VERSION, minVer)) return;
+
+    const bannerId = 'client-outdated-banner';
+    if (document.getElementById(bannerId)) return;
+    const banner = document.createElement('div');
+    banner.id = bannerId;
+    banner.className = 'client-outdated-banner';
+    banner.innerHTML = `
+        <p>${t('modals.client_outdated_banner')}</p>
+        <button type="button" class="btn-primary client-outdated-refresh">${t('modals.client_outdated_refresh')}</button>
+    `;
+    banner.querySelector('button')?.addEventListener('click', () => {
+        window.location.reload();
+    });
+    document.body.prepend(banner);
+}
+
 // --- App Initialization ---
 export async function initAppLogic() {
     if (!metaPixelId()) {
@@ -653,6 +692,8 @@ export async function initAppLogic() {
     }
     if (!['vi', 'en'].includes(currentLang)) currentLang = 'en';
     window.currentLang = currentLang;
+
+    await ensureClientVersionGate();
 
     // Global Error Handler for debugging
     window.onerror = function (msg, url, lineNo, columnNo, error) {
@@ -2962,6 +3003,11 @@ async function setupEventListeners() {
 
             if (blockIfUpgradeMaintenance()) return;
 
+            if (window.__minClientVersion != null && isClientOlderThan(APP_CLIENT_VERSION, window.__minClientVersion)) {
+                showToast(t('modals.client_outdated'));
+                return;
+            }
+
             if (!currentUser) {
                 // Nếu chưa đăng nhập thì hiện Auth Modal
                 const authModal = document.getElementById('auth-modal');
@@ -3172,6 +3218,7 @@ async function setupEventListeners() {
                                     status: "pending",
                                     resultLink: "",
                                     adminNote: "",
+                                    clientVersion: APP_CLIENT_VERSION,
                                     createdAt: serverTimestamp(),
                                     updatedAt: serverTimestamp()
                                 };

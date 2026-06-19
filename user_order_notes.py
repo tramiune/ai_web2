@@ -21,6 +21,9 @@ USER_NOTE_FILES_INVALID = USER_NOTE_VIDEO_INVALID
 USER_NOTE_SUBMIT_FAILED = (
     "Tạm thời không gửi được đơn vào hàng xử lý. Thử lại sau hoặc liên hệ hỗ trợ."
 )
+USER_NOTE_CLIENT_OUTDATED = (
+    "Bạn đang dùng phiên bản web cũ. Nhấn F5 hoặc Ctrl+Shift+R để tải bản mới nhất rồi đặt lại đơn. Coin đã hoàn."
+)
 USER_NOTE_ORDER_FAILED = USER_NOTE_TECHNICAL
 
 _MODERATION_MARKERS = (
