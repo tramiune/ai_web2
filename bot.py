@@ -31,6 +31,7 @@ from videoaieasy_web import (
     MODEL_KLING_30,
     prepare_character_image_for_vae,
     resolution_for_order,
+    duration_for_order,
 )
 
 # --- CONFIGURATION ---
@@ -1662,8 +1663,15 @@ def _try_submit_videoaieasy(order_id) -> bool:
 
 
 def submit_order(order_id):
-    """Nạp đơn theo renderProvider đang chọn (Admin). Đơn processing giữ engine cũ."""
-    provider = get_active_render_provider()
+    """Nạp đơn theo renderProvider trên đơn (nếu có) hoặc engine Admin."""
+    doc_ref = db.collection("orders").document(order_id)
+    doc = doc_ref.get()
+    data = doc.to_dict() or {} if doc.exists else {}
+    provider = (
+        _order_render_provider(data)
+        if data.get("renderProvider")
+        else get_active_render_provider()
+    )
 
     if provider == RENDER_PROVIDER_AIDANCING:
         submit_to_aidancing(order_id)
@@ -1888,6 +1896,8 @@ def submit_to_videoaieasy(order_id, account):
             vae_char_tmp = False
             try:
                 model_id = _videoaieasy_model_for_order(data)
+                resolution = resolution_for_order(data)
+                duration_sec = duration_for_order(data)
                 tier = "Kling 3.0" if model_id == MODEL_KLING_30 else "Kling 2.6"
                 prompt = (data.get("prompt") or get_env(
                     "VIDEOAIEASY_PROMPT", "Follow the reference motion naturally"
@@ -1896,7 +1906,8 @@ def submit_to_videoaieasy(order_id, account):
                 _ensure_vae_web_session(api, account_email, account.get("password"))
                 print(
                     f"🚀 [VideoAiEasy/{nick_label}] {tier} — "
-                    f"modelId={data.get('modelId')} → {model_id}..."
+                    f"modelId={data.get('modelId')} → {model_id} "
+                    f"{duration_sec}s {resolution}..."
                 )
                 for attempt in range(1, 3):
                     if attempt > 1:
@@ -1921,7 +1932,8 @@ def submit_to_videoaieasy(order_id, account):
                     driving_video_url=video_url,
                     prompt=prompt,
                     model_id=model_id,
-                    resolution=resolution_for_order(data),
+                    resolution=resolution,
+                    duration_sec=duration_sec,
                 )
                 print(f"🆔 [VideoAiEasy/{nick_label}] job: {job_id}")
                 _mark_order_processing(

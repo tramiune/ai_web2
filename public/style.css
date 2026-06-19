@@ -337,6 +337,26 @@ body.inapp-modal-open {
   }
 }
 
+.model-card-pick:has(input:checked) {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px rgba(0, 242, 254, 0.35);
+}
+
+.model-new-badge {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  z-index: 2;
+  padding: 2px 7px;
+  border-radius: 6px;
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  color: #0a0a12;
+  background: linear-gradient(135deg, #ffde00, #ffb800);
+  box-shadow: 0 2px 8px rgba(255, 222, 0, 0.35);
+}
+
 /* Custom Scrollbar */
 ::-webkit-scrollbar {
   width: 6px;

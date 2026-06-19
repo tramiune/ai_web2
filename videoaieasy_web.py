@@ -32,6 +32,8 @@ AUTH_COOKIE = "sb-gfevyulgkydodmlfnquh-auth-token"
 MODEL_KLING_26 = "kling-2.6"
 MODEL_KLING_30 = "kling-3.0"
 DEFAULT_VAE_RESOLUTION = "720p"
+QUALITY_MODEL_IDS = frozenset({"127"})
+VAE_QUALITY_DURATION_SEC = 20
 TURBO_MODEL_IDS = frozenset({"117", "125"})
 
 
@@ -304,6 +306,7 @@ class VideoAiEasyClient:
         prompt: str = "",
         model_id: str = MODEL_KLING_26,
         resolution: str | None = None,
+        duration_sec: int | None = None,
     ) -> str:
         body = {
             "mode": "motion-control",
@@ -315,6 +318,8 @@ class VideoAiEasyClient:
             "drivingVideoUrl": driving_video_url.strip(),
             "resolution": normalize_vae_resolution(resolution),
         }
+        if duration_sec is not None:
+            body["durationSec"] = int(duration_sec)
         resp = self._api(
             "POST",
             "/api/jobs",
@@ -380,13 +385,30 @@ def normalize_vae_resolution(value: str | None) -> str:
 
 def resolution_for_order(order_data: dict | None) -> str:
     data = order_data or {}
-    explicit = data.get("resolution") or data.get("videoResolution")
+    explicit = data.get("vaeResolution") or data.get("resolution") or data.get("videoResolution")
     if explicit:
         return normalize_vae_resolution(str(explicit))
     model_id = str(data.get("modelId") or "").strip()
+    if model_id in QUALITY_MODEL_IDS:
+        return normalize_vae_resolution("1080p")
     if model_id in TURBO_MODEL_IDS:
         return normalize_vae_resolution("1080p")
     return normalize_vae_resolution(None)
+
+
+def duration_for_order(order_data: dict | None) -> int:
+    data = order_data or {}
+    for key in ("vaeDurationSec", "durationSec"):
+        val = data.get(key)
+        if val is not None:
+            try:
+                return max(5, min(30, int(val)))
+            except (TypeError, ValueError):
+                pass
+    model_id = str(data.get("modelId") or "").strip()
+    if model_id in QUALITY_MODEL_IDS:
+        return VAE_QUALITY_DURATION_SEC
+    return int(get_env("VIDEOAIEASY_DEFAULT_DURATION_SEC", "15"))
 
 
 def _parse_vae_aspect_ratio(aspect_ratio: str | None) -> float:

@@ -113,10 +113,43 @@ function gatewayLabel(gateway) {
 }
 
 const MODELS = {
+    quality: {
+        nameKey: "modals.model_quality",
+        cost: 15,
+        timeKey: "modals.model_quality_desc",
+        modelId: "127",
+        renderProvider: "videoaieasy",
+        maxVideoSec: 20,
+        vaeDurationSec: 20,
+        vaeResolution: "1080p",
+        isNew: true,
+    },
     // "Model thường" uses Aidancing model id 124
     fast: { nameKey: "modals.model_fast", cost: 10, timeKey: "modals.model_fast_desc", modelId: "124" },
     turbo: { nameKey: "modals.model_turbo", cost: 20, timeKey: "modals.model_turbo_desc", modelId: "117" }
 };
+
+function getSelectedModelKey() {
+    const promo = getDailyPromoStatus(FB_CACHE.myOrders || [], FB_CACHE.userProfile);
+    if (promo.canUsePromo) return 'fast';
+    return document.querySelector('input[name="model-type"]:checked')?.value || 'quality';
+}
+
+function selectDefaultModel(modelKey = 'quality') {
+    const radio = document.querySelector(`input[name="model-type"][value="${modelKey}"]`);
+    if (radio) radio.checked = true;
+    updateModelSelectionUI();
+}
+
+function updateModelSelectionUI() {
+    const qCost = document.getElementById('model-quality-cost');
+    const fCost = document.getElementById('model-fast-cost');
+    const tCost = document.getElementById('model-turbo-cost');
+    if (qCost) qCost.textContent = String(MODELS.quality.cost);
+    if (fCost) fCost.textContent = String(MODELS.fast.cost);
+    if (tCost) tCost.textContent = String(MODELS.turbo.cost);
+    updateFirstOrderUI();
+}
 
 function localizedModel(key) {
     const m = MODELS[key];
@@ -687,6 +720,7 @@ export async function initAppLogic() {
     initPremiumEffects();
     setupEventListeners();
     syncVideos();
+    selectDefaultModel('quality');
     // Initial UI update for first order offer
     updateFirstOrderUI();
     // Check maintenance status
@@ -2281,9 +2315,8 @@ function updateFirstOrderUI() {
         const submitBtn = document.getElementById('order-submit-btn');
         const submitText = submitBtn ? submitBtn.querySelector('[data-i18n="hero.cta_create"]') : null;
         const summaryEl = document.getElementById('submit-summary-line');
-        const checkedModel = document.querySelector('input[name="model-type"]:checked');
-        const modelKey = promo.canUsePromo ? 'fast' : (checkedModel ? checkedModel.value : 'fast');
-        const baseCost = localizedModel(modelKey)?.cost ?? 10;
+        const modelKey = getSelectedModelKey();
+        const baseCost = localizedModel(modelKey)?.cost ?? MODELS.quality.cost;
 
         costEl.innerText = promo.canUsePromo ? String(DAILY_PROMO_COST) : String(baseCost);
         if (submitBtn) submitBtn.classList.toggle('btn-first-offer', promo.canUsePromo);
@@ -2947,7 +2980,7 @@ async function setupEventListeners() {
                 const promoAtSubmit = getDailyPromoStatus(FB_CACHE.myOrders || [], FB_CACHE.userProfile);
                 const modelKeySelected = promoAtSubmit.canUsePromo
                     ? 'fast'
-                    : (document.querySelector('input[name="model-type"]:checked')?.value || 'fast');
+                    : getSelectedModelKey();
                 const serviceType = document.querySelector('input[name="service-type"]:checked')?.value || 'motion-to-char';
                 let modelIdOverride = null;
 
@@ -3137,6 +3170,15 @@ async function setupEventListeners() {
                                     createdAt: serverTimestamp(),
                                     updatedAt: serverTimestamp()
                                 };
+                                if (orderModel.renderProvider) {
+                                    orderPayload.renderProvider = orderModel.renderProvider;
+                                }
+                                if (orderModel.vaeDurationSec) {
+                                    orderPayload.vaeDurationSec = orderModel.vaeDurationSec;
+                                }
+                                if (orderModel.vaeResolution) {
+                                    orderPayload.vaeResolution = orderModel.vaeResolution;
+                                }
                                 if (isDailyPromo) {
                                     orderPayload.dailyPromo = true;
                                     orderPayload.promoDate = getVnDateString();
@@ -3180,6 +3222,7 @@ async function setupEventListeners() {
                             updateFirstOrderUI();
 
                             document.getElementById('order-form').reset();
+                            selectDefaultModel('quality');
                             ['preview-char-container', 'preview-video-container', 'preview-library-video-container', 'preview-tiktok-video-container'].forEach((id) => {
                                 const el = document.getElementById(id);
                                 if (el) {
