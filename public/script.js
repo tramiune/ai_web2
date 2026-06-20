@@ -735,7 +735,7 @@ export async function initAppLogic() {
                     }
                 }
                 currentUser = null;
-                showExternalBrowserRequiredModal();
+                handleUserLoggedOut(false);
                 return;
             }
 
@@ -751,7 +751,12 @@ export async function initAppLogic() {
             if (user) {
                 currentUser = user;
                 hideAuthLoading();
-                await handleUserLoggedIn(user);
+                try {
+                    await handleUserLoggedIn(user);
+                } catch (e) {
+                    console.error("Auth profile error:", e);
+                    showToast(t('common.error_auth', { msg: e.message || e.code || 'Firestore' }));
+                }
                 return;
             }
 
@@ -973,6 +978,15 @@ window.openExternalBrowser = async (targetUrl) => {
 
     await copyPageLinkSilent(url);
 
+    const tryOpen = (href) => {
+        try {
+            const opened = window.open(href, '_blank');
+            return opened != null;
+        } catch {
+            return false;
+        }
+    };
+
     if (isAndroid) {
         try {
             const parsed = new URL(url);
@@ -981,7 +995,7 @@ window.openExternalBrowser = async (targetUrl) => {
                 `#Intent;scheme=${parsed.protocol.replace(':', '')};` +
                 `package=com.android.chrome;` +
                 `S.browser_fallback_url=${encodeURIComponent(url)};end`;
-            window.location.href = intent;
+            tryOpen(intent);
             showToast(t('modals.inapp_open_attempt'));
             return;
         } catch (e) {
@@ -991,19 +1005,9 @@ window.openExternalBrowser = async (targetUrl) => {
 
     if (isIOS) {
         const noProto = url.replace(/^https?:\/\//, '');
-        try {
-            window.location.href = `x-safari-https://${noProto}`;
+        if (tryOpen(`x-safari-https://${noProto}`) || tryOpen(`googlechromes://${noProto}`)) {
             showToast(t('modals.inapp_open_attempt'));
             return;
-        } catch (e) {
-            console.warn('[OpenBrowser] iOS Safari scheme failed:', e);
-        }
-        try {
-            window.location.href = `googlechromes://${noProto}`;
-            showToast(t('modals.inapp_open_attempt'));
-            return;
-        } catch (e) {
-            console.warn('[OpenBrowser] iOS Chrome scheme failed:', e);
         }
     }
 
@@ -1296,6 +1300,11 @@ window.useTrendShortcut = (id, url) => {
 };
 
 async function login() {
+    if (requiresExternalBrowser()) {
+        showExternalBrowserRequiredModal();
+        showToast(t('modals.inapp_browser_sub'));
+        return;
+    }
     const { auth, GoogleAuthProvider, signInWithPopup } = window.firebase;
     const provider = new GoogleAuthProvider();
     try {
@@ -1617,13 +1626,20 @@ function navigateFromURLParam() {
 }
 
 function handleUserLoggedOut(autoGoogleSignIn = false) {
-    // Show login-required popup with banner video
-    promptGoogleSignIn(autoGoogleSignIn);
+    if (requiresExternalBrowser()) {
+        showExternalBrowserRequiredModal();
+        const loginBtn = document.getElementById('login-btn');
+        const loginSection = document.getElementById('login-section');
+        if (loginBtn) loginBtn.style.display = 'none';
+        if (loginSection) loginSection.style.display = 'none';
+    } else {
+        promptGoogleSignIn(autoGoogleSignIn);
+        const loginBtn = document.getElementById('login-btn');
+        const loginSection = document.getElementById('login-section');
+        if (loginBtn) loginBtn.style.display = 'flex';
+        if (loginSection) loginSection.style.display = '';
+    }
 
-    const loginBtn = document.getElementById('login-btn');
-    const loginSection = document.getElementById('login-section');
-    if (loginBtn) loginBtn.style.display = 'flex';
-    if (loginSection) loginSection.style.display = '';
     const profileMenu = document.getElementById('user-profile-menu');
     if (profileMenu) profileMenu.style.display = 'none';
     const navbarCoin = document.getElementById('navbar-coin-widget');
