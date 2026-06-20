@@ -719,34 +719,45 @@ export async function initAppLogic() {
         return;
     }
 
-    const { auth, onAuthStateChanged, signInAnonymously } = window.firebase;
+    const { auth, onAuthStateChanged, signOut } = window.firebase;
 
     showAuthLoading();
 
     onAuthStateChanged(auth, async (user) => {
         try {
+            if (requiresExternalBrowser()) {
+                hideAuthLoading();
+                if (user) {
+                    try {
+                        await signOut(auth);
+                    } catch (e) {
+                        console.warn('[Auth] signOut in external-browser gate:', e);
+                    }
+                }
+                currentUser = null;
+                showExternalBrowserRequiredModal();
+                return;
+            }
+
+            if (user && isAnonymousUser(user)) {
+                try {
+                    await signOut(auth);
+                } catch (e) {
+                    console.warn('[Auth] signOut anonymous:', e);
+                }
+                return;
+            }
+
             if (user) {
                 currentUser = user;
                 hideAuthLoading();
-                if (isInAppBrowser()) {
-                    showInAppBrowserBanner();
-                }
                 await handleUserLoggedIn(user);
                 return;
             }
+
             currentUser = null;
-            if (typeof signInAnonymously !== 'function') {
-                hideAuthLoading();
-                showToast(t('common.error_auth', { msg: 'signInAnonymously' }));
-                return;
-            }
-            try {
-                await signInAnonymously(auth);
-            } catch (e) {
-                console.error('[Auth] Anonymous sign-in failed:', e);
-                hideAuthLoading();
-                showToast(t('common.error_auth', { msg: e?.message || 'anonymous' }));
-            }
+            hideAuthLoading();
+            handleUserLoggedOut(true);
         } catch (e) {
             console.error("Auth Change Error:", e);
             hideAuthLoading();
@@ -840,14 +851,11 @@ function setupLogoAdminUnlock() {
 }
 
 function showAdminAuthModal() {
-    const authModal = document.getElementById('auth-modal');
-    if (!authModal) return;
-    const v = document.getElementById('auth-banner-video');
-    if (v && !v.src) {
-        v.src = 'https://pub-2b53cd37b4a44642afdbb8bb470bde66.r2.dev/banner.mp4';
-    }
-    authModal.style.display = 'flex';
-    applyTranslations();
+    promptGoogleSignIn(false);
+}
+
+function requiresExternalBrowser() {
+    return !isStandaloneBrowser();
 }
 
 // --- In-app browser (TikTok / Facebook / …) ---
@@ -879,8 +887,10 @@ function hideAuthLoading() {
     document.body.classList.remove('auth-loading-active');
 }
 
-function showInAppBrowserBanner() {
-    if (!isInAppBrowser() || sessionStorage.getItem('inapp-banner-dismissed') === '1') return;
+function showExternalBrowserRequiredModal() {
+    if (!requiresExternalBrowser()) return;
+    const authModal = document.getElementById('auth-modal');
+    if (authModal) authModal.style.display = 'none';
     const modal = document.getElementById('inapp-browser-modal');
     if (!modal) return;
     modal.hidden = false;
@@ -888,12 +898,28 @@ function showInAppBrowserBanner() {
     applyTranslations();
 }
 
-window.dismissInAppBrowserBanner = () => {
-    const modal = document.getElementById('inapp-browser-modal');
-    if (modal) modal.hidden = true;
-    document.body.classList.remove('inapp-modal-open');
-    sessionStorage.setItem('inapp-banner-dismissed', '1');
-};
+function promptGoogleSignIn(autoPopup = false) {
+    if (requiresExternalBrowser()) {
+        showExternalBrowserRequiredModal();
+        return;
+    }
+    const authModal = document.getElementById('auth-modal');
+    if (!authModal) return;
+    const v = document.getElementById('auth-banner-video');
+    if (v && !v.src) {
+        v.src = 'https://pub-2b53cd37b4a44642afdbb8bb470bde66.r2.dev/banner.mp4';
+    }
+    const googleBtn = document.getElementById('google-login-btn');
+    const inAppNote = document.getElementById('inapp-auth-note');
+    if (googleBtn) googleBtn.style.display = '';
+    if (inAppNote) inAppNote.style.display = 'none';
+    authModal.style.display = 'flex';
+    applyTranslations();
+    if (autoPopup && !window.__googleSignInAutoAttempted) {
+        window.__googleSignInAutoAttempted = true;
+        setTimeout(() => login(), 600);
+    }
+}
 
 window.copyPageLinkForExternal = async (url) => {
     const link = url || window.location.href;
@@ -986,31 +1012,8 @@ window.openExternalBrowser = async (targetUrl) => {
 
 // --- Browser Detection ---
 function detectInAppBrowser() {
-    const isInApp = isInAppBrowser();
-    const isSupported = isStandaloneBrowser();
-
-    if (isInApp) {
-        showInAppBrowserBanner();
-    }
-
-    if (!isSupported) {
-        const googleBtn = document.getElementById('google-login-btn');
-        const googleDivider = document.querySelector('.google-auth-divider');
-        const inAppNote = document.getElementById('inapp-auth-note');
-        const authEmailBtn = document.getElementById('auth-email-btn');
-        const authModalDesc = document.getElementById('auth-modal-desc');
-
-        if (googleBtn) googleBtn.style.display = 'none';
-        if (googleDivider) googleDivider.style.display = 'none';
-        if (inAppNote) inAppNote.style.display = 'block';
-        if (authEmailBtn) {
-            authEmailBtn.setAttribute('data-i18n', 'modals.auth_btn_register');
-            authEmailBtn.innerText = t('modals.auth_btn_register');
-        }
-        if (authModalDesc) {
-            authModalDesc.setAttribute('data-i18n', 'modals.auth_desc_register');
-            authModalDesc.innerHTML = t('modals.auth_desc_register');
-        }
+    if (requiresExternalBrowser()) {
+        showExternalBrowserRequiredModal();
     }
 }
 
@@ -1613,14 +1616,9 @@ function navigateFromURLParam() {
     }
 }
 
-function handleUserLoggedOut() {
+function handleUserLoggedOut(autoGoogleSignIn = false) {
     // Show login-required popup with banner video
-    const authModal = document.getElementById('auth-modal');
-    if (authModal) authModal.style.display = 'flex';
-    const v = document.getElementById('auth-banner-video');
-    if (v && !v.src) {
-        v.src = 'https://pub-2b53cd37b4a44642afdbb8bb470bde66.r2.dev/banner.mp4';
-    }
+    promptGoogleSignIn(autoGoogleSignIn);
 
     const loginBtn = document.getElementById('login-btn');
     const loginSection = document.getElementById('login-section');
@@ -3009,9 +3007,7 @@ async function setupEventListeners() {
             }
 
             if (!currentUser) {
-                // Nếu chưa đăng nhập thì hiện Auth Modal
-                const authModal = document.getElementById('auth-modal');
-                if (authModal) authModal.style.display = 'flex';
+                promptGoogleSignIn(false);
                 showToast(t('common.toast_login_required'));
                 return;
             }

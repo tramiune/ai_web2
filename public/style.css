@@ -125,7 +125,7 @@ body.auth-loading-active {
 .inapp-browser-modal {
     position: fixed;
     inset: 0;
-    z-index: 10050;
+    z-index: 100100;
     display: none;
     align-items: center;
     justify-content: center;
