@@ -64,7 +64,7 @@ export async function onRequestPost(context) {
            if (topup.amount && amount < topup.amount) {
                console.warn(`[CẢNH BÁO] Nạp thiếu tiền: Yêu cầu ${topup.amount}, nhận ${amount}`);
                const message = `⚠️ *CẢNH BÁO NẠP THIẾU TIỀN!*\n\n` +
-                               `👤 Khách: ${topup.userName || 'N/A'}\n` +
+                               `👤 Khách: ${topupGuestDisplayLabel(topup)}\n` +
                                `💵 Số tiền nhận: ${amount.toLocaleString()}đ\n` +
                                `📉 Yêu cầu: ${topup.amount.toLocaleString()}đ\n` +
                                `🪙 Đơn: ${coins} Coin\n` +
@@ -79,12 +79,15 @@ export async function onRequestPost(context) {
            
            // Gửi thông báo Telegram
            const tidDisplay = transaction.tid || transaction.id || 'N/A';
+           const identityLine = topup.userEmail
+             ? `📧 Email: ${topup.userEmail}`
+             : `📝 Mã CK: \`${code}\``;
            const message = `💰 *NẠP TIỀN THÀNH CÔNG!*\n\n` +
-                           `👤 Khách: ${topup.userName || 'N/A'}\n` +
-                           `📧 Email: ${topup.userEmail || 'N/A'}\n` +
+                           `👤 Khách: ${topupGuestDisplayLabel(topup)}\n` +
+                           `${identityLine}\n` +
                            `💵 Số tiền: ${amount.toLocaleString()}đ\n` +
                            `🪙 Coin nhận: +${coins}\n` +
-                           `📝 Nội dung: ${code}\n` +
+                           `📝 Nội dung CK: \`${code}\`\n` +
                            `🔑 Mã GD: \`${tidDisplay}\``;
            await notifyTelegram(message);
 
@@ -167,6 +170,14 @@ async function getAccessToken(email, privateKey) {
   return data.access_token;
 }
 
+function topupGuestDisplayLabel(topup) {
+  const rawName = String(topup?.userName || '').trim();
+  if (rawName && rawName !== 'N/A' && rawName !== 'Khách') return rawName;
+  const uid = String(topup?.userId || '').trim();
+  if (uid) return `Khách #${uid.slice(0, 6)}`;
+  return 'Khách';
+}
+
 async function fetchPendingTopups(token, projectId) {
   const PROJECT_ID = projectId;
   const url = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents:runQuery`;
@@ -197,7 +208,7 @@ async function fetchPendingTopups(token, projectId) {
         status: fields.status.stringValue,
         transferContent: fields.transferContent.stringValue,
         coins: parseInt(fields.coins?.integerValue || 0),
-        userName: fields.userName?.stringValue || 'Khách',
+        userName: fields.userName?.stringValue || '',
         userEmail: fields.userEmail?.stringValue || '',
         amount: parseInt(fields.amount?.integerValue || fields.amount?.doubleValue || fields.amount?.stringValue || 0)
       };

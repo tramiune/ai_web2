@@ -1008,7 +1008,15 @@
                             style="margin-bottom: 1.5rem; padding: 0.8rem; background: rgba(255,255,255,0.05); border-radius: 8px; font-weight: 700; color: var(--accent); font-size: 1.1rem;">
                         </div>
 
-                        <span id="transfer-code" style="display: none;"></span>
+                        <div class="bank-info-box" style="margin-top: 0;">
+                            <div class="bank-row" style="border-bottom: none; flex-direction: column; align-items: stretch; gap: 8px;">
+                                <div style="display: flex; align-items: center; justify-content: space-between; width: 100%; gap: 8px;">
+                                    <span style="font-size: 0.85rem; color: var(--text-muted);" data-i18n="modals.transfer_note">Nội dung chuyển khoản (Bắt buộc):</span>
+                                    <button type="button" id="btn-copy-transfer-code" class="copy-btn" data-i18n="common.copy_btn">Sao chép</button>
+                                </div>
+                                <span id="transfer-code" style="color: #ffde00; font-weight: 700; font-size: 1.15rem; letter-spacing: 1px; word-break: break-all;"></span>
+                            </div>
+                        </div>
 
                         <div
                             style="margin-top: 1.5rem; display: flex; align-items: center; justify-content: center; gap: 12px; color: var(--text-muted); font-size: 0.85rem;">
@@ -1447,6 +1455,15 @@
                 ⚠️ Trình duyệt này thường chặn đăng nhập Google...
             </div>
             <p class="auth-modal-footer" data-i18n="modals.auth_footer">Chỉ mất vài giây • Hoàn toàn miễn phí</p>
+        </div>
+    </div>
+
+    <div id="video-trim-overlay" class="video-trim-overlay" style="display: none;" aria-hidden="true"
+        role="alertdialog" aria-modal="true" aria-labelledby="video-trim-title">
+        <div class="video-trim-card">
+            <div class="video-trim-spinner" aria-hidden="true"></div>
+            <h3 id="video-trim-title" class="video-trim-title" data-i18n="modals.video_trim_title">Đang cắt video...</h3>
+            <p id="video-trim-desc" class="video-trim-desc" data-i18n="modals.video_trim_wait">Vui lòng không tắt trang hoặc chuyển tab.</p>
         </div>
     </div>
 
