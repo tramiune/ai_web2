@@ -2522,6 +2522,22 @@ function hideVideoTrimOverlay() {
     document.body.classList.remove('video-trim-active');
 }
 
+function resetOrderSubmitUi(submitBtn, progressDiv) {
+    hideVideoTrimOverlay();
+    if (submitBtn) submitBtn.disabled = false;
+    if (progressDiv) progressDiv.style.display = 'none';
+    const mainText = submitBtn?.querySelector('[data-i18n="hero.cta_create"]');
+    if (mainText) mainText.innerText = t('hero.cta_create');
+    updateFirstOrderUI();
+}
+
+function referenceVideoNeedsTrim(refDurationSec, maxSec, { useLibrary = false } = {}) {
+    if (refDurationSec == null || !Number.isFinite(refDurationSec)) {
+        return useLibrary;
+    }
+    return refDurationSec > maxSec + 0.15;
+}
+
 function setVideoFileInput(file) {
     const fileInput = document.getElementById('file-video');
     if (!fileInput || !file) return;
@@ -3468,8 +3484,9 @@ async function setupEventListeners() {
                         refDurationSec = null;
                     }
                 }
-                const needsTrim = refDurationSec != null && Number.isFinite(refDurationSec) && refDurationSec > maxSec + 0.15;
-                if (needsTrim && (videoFile || useLibrary)) {
+                const needsTrim = (videoFile || useLibrary)
+                    && referenceVideoNeedsTrim(refDurationSec, maxSec, { useLibrary });
+                if (needsTrim) {
                     submitBtn.disabled = true;
                     showVideoTrimOverlay('modals.video_trim_title', { sec: maxSec });
                     try {
@@ -3489,9 +3506,7 @@ async function setupEventListeners() {
                         }
                     } catch (trimErr) {
                         console.error('[VideoTrim] submit failed:', trimErr);
-                        hideVideoTrimOverlay();
-                        submitBtn.disabled = false;
-                        updateFirstOrderUI();
+                        resetOrderSubmitUi(submitBtn, progressDiv);
                         showToast(trimErr.code ? tiktokErrorMessage(trimErr.code) : (trimErr.message || t('modals.tiktok_trim_failed')));
                         return;
                     }
@@ -3508,8 +3523,12 @@ async function setupEventListeners() {
                 }
 
                 // Kiểm tra lại lần cuối trước khi upload
-                if (charFile.size > 10 * 1024 * 1024) return showToast(t('modals.char_note'));
+                if (charFile.size > 10 * 1024 * 1024) {
+                    resetOrderSubmitUi(submitBtn, progressDiv);
+                    return showToast(t('modals.char_note'));
+                }
                 if (window.currentVideoSource === 'upload' && videoFile && videoFile.size > MAX_VIDEO_FILE_BYTES) {
+                    resetOrderSubmitUi(submitBtn, progressDiv);
                     return showToast(t('modals.video_size_limit'));
                 }
 
@@ -3836,6 +3855,62 @@ function userFacingOrderNote(order) {
         .replace(/\bxiaoyang\.online\b/gi, 'hệ thống');
 }
 
+function buildOrderCardHtml(d) {
+    const orderId = d.id.substring(d.id.length - 6).toUpperCase();
+    const createdDateObj = safeToDate(d.createdAt);
+    const date = createdDateObj ? createdDateObj.toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }) : '...';
+    const statusVN = STATUS_MAP()[d.status] || d.status;
+    const isNew = createdDateObj && (Date.now() - createdDateObj.getTime() < 5 * 60 * 1000);
+    const isCompleted = d.status === 'completed' || d.status === 'done';
+    const finalResultLink = d.resultLink;
+    const isPendingLong = d.status === 'pending' && createdDateObj && (Date.now() - createdDateObj.getTime() > 10 * 60 * 1000);
+    const delayNote = isPendingLong ? `<div class="order-delay-note">${t('dashboard.delay_note')}</div>` : '';
+    const safeResultLink = finalResultLink ? finalResultLink.replace(/'/g, "\\'") : '';
+
+    return `
+        <div class="order-card ${isNew ? 'new-order-highlight' : ''}" onclick="${isCompleted && finalResultLink ? `window.playOrderVideo(event, '${safeResultLink}')` : `window.openUserOrderDetail('${d.id}')`}">
+            <div class="order-thumb-wrapper">
+                <img src="${escapeHTML(d.characterImageLink || '')}" class="order-thumb" alt="">
+                ${isCompleted && finalResultLink ? `
+                    <div class="play-button-overlay">
+                        <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                    </div>
+                ` : ''}
+                <div class="order-status-overlay">
+                    <span class="status-badge status-${escapeHTML(d.status || 'pending')}">${escapeHTML(statusVN)}</span>
+                </div>
+                ${isNew ? '<span class="new-badge-float">NEW</span>' : ''}
+            </div>
+            <div class="order-info">
+                <div class="order-id-row">
+                    <span class="order-id-text">#${escapeHTML(orderId)}</span>
+                    <span class="order-date-text">${escapeHTML(date)}</span>
+                </div>
+                <div class="order-type-text">${escapeHTML(d.serviceLabel || d.packageName || '')}</div>
+                ${delayNote}
+                ${userFacingOrderNote(d) ? `<div class="order-system-note">💬 ${escapeHTML(userFacingOrderNote(d))}</div>` : ''}
+                <div class="order-footer">
+                    <div class="order-cost-tag">
+                        <svg style="width: 12px; height: 12px;" viewBox="0 0 24 24" fill="none">
+                            <path d="M12 2L20.66 7V17L12 22L3.34 17V7L12 2Z" fill="url(#coin-gradient)" fill-opacity="0.2" stroke="url(#coin-gradient)" stroke-width="2"/>
+                            <path d="M12 6L17.2 9V15L12 18L6.8 15V9L12 6Z" fill="url(#coin-gradient)"/>
+                        </svg>
+                        <span>${Number(d.costCoins) || 0}</span>
+                    </div>
+                    <div style="display: flex; gap: 8px; align-items: center;">
+                        ${isCompleted && finalResultLink ? `
+                            <button type="button" class="order-download-btn" data-url="${escapeHTML(finalResultLink)}" data-name="${escapeHTML(`motionai_video_${orderId}.mp4`)}" data-mime="video/mp4" onclick="window.downloadMediaFromEl(event, this)">
+                                ${t('dashboard.download_btn')}
+                            </button>
+                        ` : ''}
+                        <button class="order-view-btn" onclick="event.stopPropagation(); window.openUserOrderDetail('${escapeHTML(d.id)}')">${t('dashboard.action_view_details')}</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
 function renderMyOrders() {
     const grid = document.getElementById('my-orders-grid');
     const countText = document.getElementById('orders-count-text');
@@ -3860,63 +3935,7 @@ function renderMyOrders() {
 
     if (countText) countText.innerText = `${sortedDocs.length} Videos`;
 
-    grid.innerHTML = sortedDocs.map(d => {
-            const orderId = d.id.substring(d.id.length - 6).toUpperCase();
-            const createdDateObj = safeToDate(d.createdAt);
-            const date = createdDateObj ? createdDateObj.toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }) : '...';
-            const statusVN = STATUS_MAP()[d.status] || d.status;
-            const isNew = createdDateObj && (Date.now() - createdDateObj.getTime() < 5 * 60 * 1000);
-            const isCompleted = d.status === 'completed' || d.status === 'done';
-            const finalResultLink = d.resultLink;
-
-            const isPendingLong = d.status === 'pending' && createdDateObj && (Date.now() - createdDateObj.getTime() > 10 * 60 * 1000);
-            const delayNote = isPendingLong ? `<div class="order-delay-note">${t('dashboard.delay_note')}</div>` : '';
-
-            return `
-                <div class="order-card ${isNew ? 'new-order-highlight' : ''}" onclick="${isCompleted && d.resultLink ? `window.playOrderVideo(event, '${d.resultLink}')` : `window.openUserOrderDetail('${d.id}')`}">
-                    <div class="order-thumb-wrapper">
-                        <img src="${d.characterImageLink}" class="order-thumb">
-                        
-                        ${isCompleted && d.resultLink ? `
-                            <div class="play-button-overlay">
-                                <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-                            </div>
-                        ` : ''}
-
-                        <div class="order-status-overlay">
-                            <span class="status-badge status-${d.status}">${statusVN}</span>
-                        </div>
-                        ${isNew ? '<span class="new-badge-float">NEW</span>' : ''}
-                    </div>
-                    <div class="order-info">
-                        <div class="order-id-row">
-                            <span class="order-id-text">#${orderId}</span>
-                            <span class="order-date-text">${date}</span>
-                        </div>
-                        <div class="order-type-text">${d.serviceLabel || ''}</div>
-                        ${delayNote}
-                        ${userFacingOrderNote(d) ? `<div class="order-system-note">💬 ${escapeHTML(userFacingOrderNote(d))}</div>` : ''}
-                        <div class="order-footer">
-                            <div class="order-cost-tag">
-                                <svg style="width: 12px; height: 12px;" viewBox="0 0 24 24" fill="none">
-                                    <path d="M12 2L20.66 7V17L12 22L3.34 17V7L12 2Z" fill="url(#coin-gradient)" fill-opacity="0.2" stroke="url(#coin-gradient)" stroke-width="2"/>
-                                    <path d="M12 6L17.2 9V15L12 18L6.8 15V9L12 6Z" fill="url(#coin-gradient)"/>
-                                </svg>
-                                <span>${d.costCoins}</span>
-                            </div>
-                            <div style="display: flex; gap: 8px; align-items: center;">
-                                ${isCompleted && finalResultLink ? `
-                                    <button type="button" class="order-download-btn" data-url="${escapeHTML(finalResultLink)}" data-name="${escapeHTML(`motionai_video_${orderId}.mp4`)}" data-mime="video/mp4" onclick="window.downloadMediaFromEl(event, this)">
-                                        ${t('dashboard.download_btn')}
-                                    </button>
-                                ` : ''}
-                                <button class="order-view-btn" onclick="event.stopPropagation(); window.openUserOrderDetail('${d.id}')">${t('dashboard.action_view_details')}</button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            `;
-        }).join('');
+    grid.innerHTML = sortedDocs.map((d) => buildOrderCardHtml(d)).join('');
 }
 
 
@@ -6315,6 +6334,9 @@ function syncBatchSourceModeUI(mode) {
     if (ordersRadio) ordersRadio.checked = m === 'orders';
     if (tiktokWrap) tiktokWrap.style.display = m === 'tiktok' ? 'block' : 'none';
     if (ordersWrap) ordersWrap.style.display = m === 'orders' ? 'block' : 'none';
+    document.querySelectorAll('.batch-source-tab').forEach((btn) => {
+        btn.classList.toggle('active', btn.getAttribute('data-mode') === m);
+    });
 }
 
 function getBatchSelectedOrderIds() {
@@ -6330,103 +6352,73 @@ function renderBatchChannelOrderPicker(orders, selectedIds = []) {
     if (!wrap) return;
     const selected = new Set(selectedIds || []);
     if (!orders.length) {
-        wrap.innerHTML = `<p style="opacity:0.6;padding:0.75rem;margin:0;">${t('build_channel.orders_pick_empty')}</p>`;
+        wrap.innerHTML = `<div class="batch-empty-hint">${t('build_channel.orders_pick_empty')}</div>`;
         return;
     }
     wrap.innerHTML = orders.map((o) => {
         const id = o.id;
         const shortId = id.slice(-6).toUpperCase();
         const checked = selected.has(id) ? 'checked' : '';
-        const img = o.characterImageLink
-            ? `<img src="${escapeHTML(o.characterImageLink)}" alt="" style="width:48px;height:48px;object-fit:cover;border-radius:6px;">`
-            : '';
-        const vid = o.referenceVideoLink
-            ? `<video src="${escapeHTML(o.referenceVideoLink)}" muted playsinline style="width:48px;height:48px;object-fit:cover;border-radius:6px;background:#000;"></video>`
-            : '';
         return `
-        <label style="display:flex;align-items:center;gap:0.6rem;padding:0.5rem;border-bottom:1px solid var(--glass-border);cursor:pointer;">
+        <label class="batch-order-pick-item">
             <input type="checkbox" data-order-id="${escapeHTML(id)}" ${checked}>
-            <div style="display:flex;gap:0.35rem;">${img}${vid}</div>
-            <div style="flex:1;min-width:0;">
-                <div style="font-weight:600;">#${escapeHTML(shortId)}</div>
-                <div style="font-size:0.75rem;opacity:0.7;overflow:hidden;text-overflow:ellipsis;">${escapeHTML(o.userName || o.userEmail || '')}</div>
+            <div class="batch-order-pick-thumb">
+                ${o.characterImageLink ? `<img src="${escapeHTML(o.characterImageLink)}" alt="">` : ''}
             </div>
-            <span class="status-badge status-${escapeHTML(o.status || 'pending')}">${escapeHTML(o.status || '')}</span>
+            <div class="batch-order-pick-meta">
+                <div class="batch-order-pick-id">#${escapeHTML(shortId)}</div>
+                <div class="batch-order-pick-user">${escapeHTML(o.userName || o.userEmail || t('common.guest'))}</div>
+            </div>
+            <span class="status-badge status-${escapeHTML(o.status || 'pending')}">${escapeHTML(STATUS_MAP()[o.status] || o.status || '')}</span>
         </label>`;
     }).join('');
 }
 
-function renderBatchChannelOrdersGallery(orders) {
-    const grid = document.getElementById('batch-channel-orders-gallery');
+function renderBatchChannelVideosGrid(orders) {
+    const grid = document.getElementById('batch-channel-videos-grid');
+    const countEl = document.getElementById('batch-channel-videos-count');
     if (!grid) return;
     if (!orders.length) {
-        grid.innerHTML = `<p style="opacity:0.6;grid-column:1/-1;">${t('build_channel.orders_gallery_empty')}</p>`;
+        grid.innerHTML = `<div style="grid-column: 1/-1; text-align:center; opacity: 0.5; padding: 4rem 2rem; background: rgba(255,255,255,0.02); border-radius: 16px; border: 1px dashed var(--glass-border);">
+            <div style="font-size: 3rem; margin-bottom: 1rem;">🎬</div>
+            <div>${t('build_channel.videos_empty')}</div>
+        </div>`;
+        if (countEl) countEl.textContent = '';
         return;
     }
-    grid.innerHTML = orders.map((o) => {
-        const shortId = o.id.slice(-6).toUpperCase();
-        const img = o.characterImageLink
-            ? `<img src="${escapeHTML(o.characterImageLink)}" alt="" style="width:100%;aspect-ratio:9/16;object-fit:cover;border-radius:8px;background:#111;">`
-            : `<div style="aspect-ratio:9/16;background:rgba(255,255,255,0.05);border-radius:8px;"></div>`;
-        const vid = o.referenceVideoLink
-            ? `<video src="${escapeHTML(o.referenceVideoLink)}" controls playsinline style="width:100%;aspect-ratio:9/16;object-fit:cover;border-radius:8px;background:#000;margin-top:0.5rem;"></video>`
-            : '';
-        return `
-        <div class="glass-card" style="padding:0.75rem;">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem;">
-                <strong>#${escapeHTML(shortId)}</strong>
-                <span class="status-badge status-${escapeHTML(o.status || 'pending')}">${escapeHTML(o.status || '')}</span>
-            </div>
-            ${img}
-            ${vid}
-            <button type="button" class="btn-secondary" style="width:100%;margin-top:0.5rem;font-size:0.8rem;" onclick="window.navTo('admin-panel');window.openAdminDetail('${escapeHTML(o.id)}')">${t('build_channel.open_order')}</button>
-        </div>`;
-    }).join('');
+    if (countEl) countEl.textContent = `${orders.length} video`;
+    grid.innerHTML = orders.map((o) => buildOrderCardHtml(o)).join('');
 }
 
 function renderBatchChannelStatus(cfg) {
     const el = document.getElementById('batch-channel-status');
-    if (!el) return;
-    if (!cfg) {
-        el.innerHTML = t('build_channel.status_off');
-        return;
-    }
-    if (batchChannelRunNowPending(cfg)) {
-        el.innerHTML = t('build_channel.status_run_now_pending');
-        return;
-    }
-    const on = !!cfg.enabled;
-    const hour = cfg.cronHour != null ? Number(cfg.cronHour) : 3;
-    const onText = t('build_channel.status_on', { hour: Number.isFinite(hour) ? hour : 3 });
-    const extra = cfg.lastRunMessage ? ` — ${cfg.lastRunMessage}` : '';
-    el.innerHTML = (on ? onText : t('build_channel.status_off')) + extra;
-}
+    const chip = document.getElementById('batch-channel-status-chip');
+    let html = '';
+    let chipClass = 'batch-status-chip batch-status-chip--off';
+    let chipText = t('build_channel.status_off_short');
 
-function renderBatchChannelRuns(rows) {
-    const tbody = document.getElementById('batch-channel-runs-list');
-    if (!tbody) return;
-    if (!rows.length) {
-        tbody.innerHTML = `<tr><td colspan="4" style="text-align:center; opacity:0.5; padding:2rem;">${t('build_channel.runs_empty')}</td></tr>`;
-        return;
+    if (!cfg) {
+        html = t('build_channel.status_off');
+    } else if (batchChannelRunNowPending(cfg)) {
+        html = t('build_channel.status_run_now_pending');
+        chipClass = 'batch-status-chip batch-status-chip--running';
+        chipText = t('build_channel.status_running_short');
+    } else if (cfg.enabled) {
+        const hour = cfg.cronHour != null ? Number(cfg.cronHour) : 3;
+        html = t('build_channel.status_on', { hour: Number.isFinite(hour) ? hour : 3 });
+        if (cfg.lastRunMessage) html += ` — ${escapeHTML(cfg.lastRunMessage)}`;
+        chipClass = 'batch-status-chip batch-status-chip--on';
+        chipText = t('build_channel.status_on_short', { hour: Number.isFinite(hour) ? hour : 3 });
+    } else {
+        html = t('build_channel.status_off');
+        if (cfg.lastRunMessage) html += ` — ${escapeHTML(cfg.lastRunMessage)}`;
     }
-    tbody.innerHTML = rows.map((r) => {
-        const errs = Array.isArray(r.errors) ? r.errors.filter(Boolean) : [];
-        const errText = errs.length ? errs[errs.length - 1] : '';
-        const items = Array.isArray(r.items) ? r.items : [];
-        const orderIds = items.map((it) => it.orderId).filter(Boolean);
-        const statusExtra = errText
-            ? `<div style="font-size:0.75rem;color:#ff6b6b;margin-top:0.25rem;">${escapeHTML(errText)}</div>`
-            : (orderIds.length
-                ? `<div style="font-size:0.75rem;opacity:0.7;margin-top:0.25rem;">Đơn: ${orderIds.map((id) => `<a href="#" onclick="event.preventDefault();window.navTo('admin-panel');window.openAdminDetail('${escapeHTML(id)}')" style="color:#ffde00;">#${escapeHTML(id.slice(-6).toUpperCase())}</a>`).join(', ')}</div>`
-                : '');
-        return `
-        <tr>
-            <td>${escapeHTML(r.dateVN || '—')}</td>
-            <td>${Number(r.videosFound) || 0}</td>
-            <td>${Number(r.ordersCreated) || 0}</td>
-            <td>${escapeHTML(r.status || '—')}${statusExtra}</td>
-        </tr>`;
-    }).join('');
+
+    if (el) el.textContent = html;
+    if (chip) {
+        chip.className = chipClass;
+        chip.textContent = chipText;
+    }
 }
 
 async function loadBatchChannelPage() {
@@ -6437,6 +6429,27 @@ async function loadBatchChannelPage() {
         window.__batchSourceModeBound = true;
         document.getElementById('batch-source-tiktok')?.addEventListener('change', () => syncBatchSourceModeUI('tiktok'));
         document.getElementById('batch-source-orders')?.addEventListener('change', () => syncBatchSourceModeUI('orders'));
+        document.querySelectorAll('.batch-source-tab').forEach((btn) => {
+            btn.addEventListener('click', () => {
+                const mode = btn.getAttribute('data-mode') || 'tiktok';
+                syncBatchSourceModeUI(mode);
+            });
+        });
+        const templateZone = document.getElementById('batch-template-zone');
+        const templateInput = document.getElementById('batch-template-input');
+        templateZone?.addEventListener('click', (e) => {
+            if (e.target.closest('.preview-change-btn')) return;
+            templateInput?.click();
+        });
+        templateInput?.addEventListener('change', () => {
+            const file = templateInput.files?.[0];
+            if (!file) return;
+            const preview = document.getElementById('batch-template-preview');
+            if (preview) {
+                preview.innerHTML = `<img src="${URL.createObjectURL(file)}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:12px;">`;
+                templateZone?.classList.add('has-preview');
+            }
+        });
     }
 
     fbUnsub('batchChannelConfig');
@@ -6458,19 +6471,13 @@ async function loadBatchChannelPage() {
         syncBatchSourceModeUI(cfg?.sourceMode || 'tiktok');
         const preview = document.getElementById('batch-template-preview');
         if (preview && cfg?.templateImageUrl) {
-            preview.innerHTML = `<img src="${escapeHTML(cfg.templateImageUrl)}" alt="" style="width:100%; border-radius:8px;">`;
+            preview.innerHTML = `<img src="${escapeHTML(cfg.templateImageUrl)}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:12px;">`;
+            document.getElementById('batch-template-zone')?.classList.add('has-preview');
         }
         if (cfg?.selectedOrderIds?.length) {
             renderBatchChannelOrderPicker(_batchChannelPickerOrders, cfg.selectedOrderIds);
         }
     }, (err) => console.error('[BatchChannel] config listener:', err)));
-
-    fbUnsub('batchChannelRuns');
-    const runsQ = query(collection(db, 'batchChannelRuns'), orderBy('startedAt', 'desc'), limit(20));
-    fbSub('batchChannelRuns', onSnapshot(runsQ, (snap) => {
-        const rows = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
-        renderBatchChannelRuns(rows);
-    }, (err) => console.error('[BatchChannel] runs listener:', err)));
 
     fbUnsub('batchChannelOrdersPick');
     const pickQ = query(collection(db, 'orders'), orderBy('createdAt', 'desc'), limit(80));
@@ -6486,9 +6493,9 @@ async function loadBatchChannelPage() {
     fbSub('batchChannelOrdersGallery', onSnapshot(galleryQ, (snap) => {
         const rows = snap.docs
             .map((d) => ({ id: d.id, ...d.data() }))
-            .filter((o) => o.isBatchChannel && (o.characterImageLink || o.referenceVideoLink));
-        renderBatchChannelOrdersGallery(rows.slice(0, 24));
-    }, (err) => console.error('[BatchChannel] gallery:', err)));
+            .filter((o) => o.isBatchChannel && (o.characterImageLink || o.resultLink));
+        renderBatchChannelVideosGrid(rows);
+    }, (err) => console.error('[BatchChannel] videos grid:', err)));
 }
 
 window.saveBatchChannelConfig = async (enable) => {
@@ -6520,7 +6527,8 @@ window.saveBatchChannelConfig = async (enable) => {
             templateImageUrl = await uploadFile(file, 'characters');
             const preview = document.getElementById('batch-template-preview');
             if (preview) {
-                preview.innerHTML = `<img src="${escapeHTML(templateImageUrl)}" alt="" style="width:100%; border-radius:8px;">`;
+                preview.innerHTML = `<img src="${escapeHTML(templateImageUrl)}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:12px;">`;
+                document.getElementById('batch-template-zone')?.classList.add('has-preview');
             }
         } catch (e) {
             console.error('[BatchChannel] upload template:', e);

@@ -578,112 +578,89 @@
 
     <!-- Build Channel Page -->
     <div id="build-channel-page" class="dashboard" style="display: none;">
-        <div class="db-header">
-            <div class="user-info-section">
-                <h1 class="user-greeting-text">Chào mừng, User! ✨</h1>
-                <p class="user-email-text" style="opacity: 0.6; font-size: 0.9rem;"></p>
-            </div>
-
-            <div class="wallet-card">
-                <div class="wallet-icon">
-                    <svg style="width: 24px; height: 24px;" viewBox="0 0 24 24" fill="none">
-                        <path d="M12 2L20.66 7V17L12 22L3.34 17V7L12 2Z" fill="url(#coin-gradient)"
-                            fill-opacity="0.2" stroke="url(#coin-gradient)" stroke-width="2" />
-                        <path d="M12 6L17.2 9V15L12 18L6.8 15V9L12 6Z" fill="url(#coin-gradient)" />
-                        <path d="M12 9V15M9 12H15" stroke="white" stroke-width="1.5" stroke-linecap="round" />
-                    </svg>
+        <div class="db-header" style="margin-bottom: 1rem;">
+            <div style="display:flex; align-items:center; justify-content:space-between; gap:12px; width:100%; flex-wrap:wrap;">
+                <div class="user-info-section">
+                    <h1 style="margin:0; font-size:1.25rem; font-weight:800;" data-i18n="build_channel.title">Xây kênh tự động</h1>
+                    <p style="margin:6px 0 0; opacity:0.65; font-size:0.9rem;" data-i18n="build_channel.subtitle">Tự động lấy video TikTok → thay đồ → tạo đơn copy motion.</p>
                 </div>
-                <div class="wallet-info">
-                    <span class="wallet-label" data-i18n="dashboard.balance">Số dư Coin</span>
-                    <div class="wallet-value"><span class="coin-balance-text">0</span></div>
-                </div>
-                <button class="topup-pill-btn" onclick="window.openTopupModal()">
-                    <span>+</span> <span data-i18n="dashboard.topup">Nạp thêm</span>
+                <button class="btn-secondary" onclick="window.navTo('user-dashboard')" style="padding:0.5rem 1rem; font-size:0.8rem;">
+                    <span data-i18n="modals.back">Quay lại</span>
                 </button>
             </div>
         </div>
 
-        <div class="section-header" style="text-align: left; margin-bottom: 1.5rem; margin-top: 2rem; display: flex; align-items: center; justify-content: space-between;">
-            <h2 data-i18n="build_channel.title">Xây kênh tự động (Admin)</h2>
-            <button class="btn-secondary" onclick="window.navTo('user-dashboard')" style="padding: 0.5rem 1rem; font-size: 0.8rem;">
-                <span data-i18n="modals.back">Quay lại</span>
-            </button>
-        </div>
+        <div class="batch-channel-layout">
+            <section class="batch-channel-panel glass-card">
+                <div class="batch-panel-head">
+                    <h3 data-i18n="build_channel.setup_title">Cài đặt kênh</h3>
+                    <span id="batch-channel-status-chip" class="batch-status-chip batch-status-chip--off">Tắt</span>
+                </div>
 
-        <div class="glass-card" style="padding: 1.5rem; margin-bottom: 1.5rem;">
-            <p style="margin: 0 0 0.5rem; opacity: 0.8; line-height: 1.5;" data-i18n="build_channel.desc">
-                Upload ảnh mẫu + nguồn video. Cron tự chạy mỗi ngày theo giờ bạn chọn → thay đồ full (áo + quần/váy) → tạo đơn copy motion.
-            </p>
-            <div style="display: grid; gap: 1rem; max-width: 720px;">
-                <div>
-                    <label style="display:block; font-size:0.85rem; opacity:0.7; margin-bottom:0.4rem;" data-i18n="build_channel.template_label">Ảnh mẫu (nhân vật + background)</label>
-                    <input type="file" id="batch-template-input" accept="image/*" class="form-control">
-                    <div id="batch-template-preview" style="margin-top:0.75rem; max-width:200px;"></div>
-                </div>
-                <div>
-                    <label style="display:block; font-size:0.85rem; opacity:0.7; margin-bottom:0.4rem;" data-i18n="build_channel.source_mode_label">Nguồn video</label>
-                    <div style="display:flex; gap:1rem; flex-wrap:wrap;">
-                        <label style="display:flex; align-items:center; gap:0.4rem; cursor:pointer;">
-                            <input type="radio" name="batch-source-mode" id="batch-source-tiktok" value="tiktok" checked>
-                            <span data-i18n="build_channel.source_tiktok">Kênh TikTok (video hôm qua)</span>
-                        </label>
-                        <label style="display:flex; align-items:center; gap:0.4rem; cursor:pointer;">
-                            <input type="radio" name="batch-source-mode" id="batch-source-orders" value="orders">
-                            <span data-i18n="build_channel.source_orders">Copy đơn có ảnh + video</span>
-                        </label>
+                <div class="batch-field">
+                    <label class="batch-field-label" data-i18n="build_channel.template_label">Ảnh mẫu (nhân vật + background)</label>
+                    <div id="batch-template-zone" class="upload-zone upload-zone--small batch-template-zone">
+                        <input type="file" id="batch-template-input" accept="image/*" hidden>
+                        <div id="batch-template-preview" class="batch-template-preview"></div>
+                        <span data-i18n="build_channel.template_pick">Chọn ảnh mẫu</span>
+                        <p class="upload-note" data-i18n="build_channel.template_hint">Ảnh nhân vật + nền dùng cho mọi video batch.</p>
                     </div>
                 </div>
-                <div id="batch-channel-tiktok-wrap">
-                    <label style="display:block; font-size:0.85rem; opacity:0.7; margin-bottom:0.4rem;" data-i18n="build_channel.channel_label">Link kênh TikTok</label>
+
+                <div class="batch-field">
+                    <label class="batch-field-label" data-i18n="build_channel.source_mode_label">Nguồn video</label>
+                    <div class="batch-source-tabs">
+                        <button type="button" class="batch-source-tab active" data-mode="tiktok" data-i18n="build_channel.source_tiktok">TikTok hôm qua</button>
+                        <button type="button" class="batch-source-tab" data-mode="orders" data-i18n="build_channel.source_orders">Copy đơn có sẵn</button>
+                    </div>
+                    <input type="radio" name="batch-source-mode" id="batch-source-tiktok" value="tiktok" checked hidden>
+                    <input type="radio" name="batch-source-mode" id="batch-source-orders" value="orders" hidden>
+                </div>
+
+                <div id="batch-channel-tiktok-wrap" class="batch-field">
+                    <label class="batch-field-label" data-i18n="build_channel.channel_label">Link kênh TikTok</label>
                     <input type="url" id="batch-channel-url" class="form-control" placeholder="https://www.tiktok.com/@username" data-i18n="build_channel.channel_placeholder">
-                    <div style="margin-top:0.75rem;">
-                        <label style="display:block; font-size:0.85rem; opacity:0.7; margin-bottom:0.4rem;" data-i18n="build_channel.yesterday_count_label">Số video hôm qua</label>
-                        <input type="number" id="batch-yesterday-count" class="form-control" min="0" max="50" value="0" style="width:120px;">
-                        <p style="margin:0.35rem 0 0; font-size:0.78rem; opacity:0.6;" data-i18n="build_channel.yesterday_count_hint">0 = tất cả video đăng hôm qua. Cron + Làm ngay dùng giá trị này (ưu tiên video mới hơn).</p>
+                    <div class="batch-inline-field">
+                        <label class="batch-field-label" data-i18n="build_channel.yesterday_count_label">Số video hôm qua</label>
+                        <input type="number" id="batch-yesterday-count" class="form-control" min="0" max="50" value="0">
+                        <p class="batch-field-hint" data-i18n="build_channel.yesterday_count_hint">0 = tất cả video hôm qua (ưu tiên mới nhất).</p>
                     </div>
                 </div>
-                <div id="batch-channel-orders-wrap" style="display:none;">
-                    <label style="display:block; font-size:0.85rem; opacity:0.7; margin-bottom:0.4rem;" data-i18n="build_channel.orders_pick_label">Chọn đơn nguồn (đã có ảnh + video)</label>
-                    <div id="batch-channel-orders-pick" style="max-height:280px; overflow:auto; border:1px solid var(--glass-border); border-radius:8px; padding:0.5rem;"></div>
+
+                <div id="batch-channel-orders-wrap" class="batch-field" style="display:none;">
+                    <label class="batch-field-label" data-i18n="build_channel.orders_pick_label">Chọn đơn nguồn</label>
+                    <div id="batch-channel-orders-pick" class="batch-order-pick-list"></div>
                 </div>
-                <div style="display:flex; gap:1rem; flex-wrap:wrap; align-items:flex-end;">
-                    <div>
-                        <label style="display:block; font-size:0.85rem; opacity:0.7; margin-bottom:0.4rem;" data-i18n="build_channel.cron_hour_label">Giờ cron (VN)</label>
-                        <input type="number" id="batch-cron-hour" class="form-control" min="0" max="23" value="3" style="width:88px;">
-                    </div>
+
+                <div class="batch-inline-field">
+                    <label class="batch-field-label" data-i18n="build_channel.cron_hour_label">Giờ chạy tự động (VN)</label>
+                    <input type="number" id="batch-cron-hour" class="form-control" min="0" max="23" value="3" style="max-width:88px;">
                 </div>
-                <div style="display:flex; gap:0.75rem; flex-wrap:wrap; align-items:center;">
-                    <button type="button" class="btn-primary" id="batch-channel-start-btn" onclick="window.saveBatchChannelConfig(true)" data-i18n="build_channel.start_btn">Bắt đầu cron</button>
-                    <button type="button" class="btn-secondary" id="batch-channel-stop-btn" onclick="window.saveBatchChannelConfig(false)" data-i18n="build_channel.stop_btn">Tắt</button>
+
+                <div class="batch-actions">
                     <button type="button" class="btn-secondary" id="batch-channel-run-now-btn" onclick="window.triggerBatchChannelRunNow()" data-i18n="build_channel.run_now_btn">Chạy thử (1 video)</button>
                     <button type="button" class="btn-primary" id="batch-channel-run-full-btn" onclick="window.triggerBatchChannelRunFull()" data-i18n="build_channel.run_full_btn">Làm ngay</button>
                 </div>
-                <p id="batch-channel-status" style="margin:0; font-size:0.85rem; opacity:0.75;"></p>
+                <div class="batch-actions batch-actions--secondary">
+                    <button type="button" class="btn-primary" id="batch-channel-start-btn" onclick="window.saveBatchChannelConfig(true)" data-i18n="build_channel.start_btn">Bật tự động hàng ngày</button>
+                    <button type="button" class="btn-secondary" id="batch-channel-stop-btn" onclick="window.saveBatchChannelConfig(false)" data-i18n="build_channel.stop_btn">Tắt</button>
+                </div>
+                <p id="batch-channel-status" class="batch-status-text"></p>
+            </section>
+        </div>
+
+        <div class="batch-videos-section">
+            <div class="batch-videos-head">
+                <div>
+                    <h2 data-i18n="build_channel.videos_title">Video của tôi</h2>
+                    <p data-i18n="build_channel.videos_subtitle">Đơn do xây kênh tự động tạo — giống trang chủ.</p>
+                </div>
+                <span id="batch-channel-videos-count" class="batch-videos-count"></span>
             </div>
-        </div>
-
-        <div class="section-header" style="text-align: left; margin-bottom: 1rem; margin-top: 1.5rem;">
-            <h3 data-i18n="build_channel.orders_gallery_title">Đơn batch (ảnh + video)</h3>
-        </div>
-        <div id="batch-channel-orders-gallery" style="display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:1rem; margin-bottom:1.5rem;"></div>
-
-        <div class="section-header" style="text-align: left; margin-bottom: 1rem;">
-            <h3 data-i18n="build_channel.runs_title">Lịch sử chạy batch</h3>
-        </div>
-        <div class="data-table-container" style="background: var(--bg-card); border-radius: var(--radius-md);">
-            <table class="data-table">
-                <thead>
-                    <tr>
-                        <th data-i18n="build_channel.col_date">Ngày (VN)</th>
-                        <th data-i18n="build_channel.col_videos">Video</th>
-                        <th data-i18n="build_channel.col_orders">Đơn tạo</th>
-                        <th data-i18n="build_channel.col_status">Trạng thái</th>
-                    </tr>
-                </thead>
-                <tbody id="batch-channel-runs-list">
-                    <tr><td colspan="4" style="text-align:center; opacity:0.5; padding:2rem;" data-i18n="build_channel.runs_empty">Chưa có lần chạy nào.</td></tr>
-                </tbody>
-            </table>
+            <p style="font-size:0.75rem; color:var(--text-muted); margin:0 0 0.75rem;">
+                <span data-i18n="dashboard.note_storage">⚠️ Video kết quả chỉ lưu 3 ngày. Vui lòng tải về sớm!</span>
+            </p>
+            <div id="batch-channel-videos-grid" class="orders-grid"></div>
         </div>
     </div>
 

@@ -4830,7 +4830,7 @@ body.video-trim-active {
 .video-trim-overlay {
   position: fixed;
   inset: 0;
-  z-index: 100010;
+  z-index: 100300;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -4900,5 +4900,235 @@ body.video-trim-active {
 #preview-tiktok-video-container,
 #preview-library-video-container {
   position: relative;
+}
+
+/* ========== Build channel page ========== */
+.batch-channel-layout {
+  margin-bottom: 2rem;
+}
+
+.batch-channel-panel {
+  padding: 1.25rem;
+  max-width: 720px;
+}
+
+.batch-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
+}
+
+.batch-panel-head h3 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.batch-status-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.35rem 0.75rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.batch-status-chip--off {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.65);
+}
+
+.batch-status-chip--on {
+  background: rgba(39, 174, 96, 0.18);
+  color: #6ee7a8;
+  border: 1px solid rgba(39, 174, 96, 0.35);
+}
+
+.batch-status-chip--running {
+  background: rgba(255, 193, 7, 0.16);
+  color: #ffd666;
+  border: 1px solid rgba(255, 193, 7, 0.35);
+}
+
+.batch-field {
+  margin-bottom: 1rem;
+}
+
+.batch-field-label {
+  display: block;
+  font-size: 0.82rem;
+  opacity: 0.75;
+  margin-bottom: 0.45rem;
+  font-weight: 600;
+}
+
+.batch-field-hint,
+.batch-status-text {
+  margin: 0.35rem 0 0;
+  font-size: 0.78rem;
+  opacity: 0.65;
+  line-height: 1.45;
+}
+
+.batch-inline-field {
+  margin-top: 0.75rem;
+}
+
+.batch-template-zone {
+  min-height: 180px;
+  cursor: pointer;
+}
+
+.batch-template-zone.has-preview > span,
+.batch-template-zone.has-preview > .upload-note {
+  display: none;
+}
+
+.batch-template-preview {
+  width: 100%;
+  min-height: 140px;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.batch-source-tabs {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+.batch-source-tab {
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-main);
+  border-radius: 999px;
+  padding: 0.55rem 1rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.batch-source-tab.active {
+  background: rgba(138, 43, 226, 0.22);
+  border-color: rgba(138, 43, 226, 0.55);
+  color: #fff;
+}
+
+.batch-actions {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-top: 1rem;
+}
+
+.batch-actions--secondary {
+  margin-top: 0.65rem;
+}
+
+.batch-order-pick-list {
+  max-height: 280px;
+  overflow: auto;
+  border: 1px solid var(--glass-border);
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.15);
+}
+
+.batch-order-pick-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.65rem 0.75rem;
+  border-bottom: 1px solid var(--glass-border);
+  cursor: pointer;
+}
+
+.batch-order-pick-item:last-child {
+  border-bottom: none;
+}
+
+.batch-order-pick-thumb {
+  width: 44px;
+  height: 44px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.06);
+  flex-shrink: 0;
+}
+
+.batch-order-pick-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.batch-order-pick-meta {
+  flex: 1;
+  min-width: 0;
+}
+
+.batch-order-pick-id {
+  font-weight: 700;
+  font-size: 0.88rem;
+}
+
+.batch-order-pick-user {
+  font-size: 0.75rem;
+  opacity: 0.65;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.batch-empty-hint {
+  padding: 1rem;
+  opacity: 0.6;
+  text-align: center;
+}
+
+.batch-videos-section {
+  margin-top: 0.5rem;
+}
+
+.batch-videos-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.25rem;
+}
+
+.batch-videos-head h2 {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 800;
+}
+
+.batch-videos-head p {
+  margin: 0.25rem 0 0;
+  font-size: 0.82rem;
+  opacity: 0.65;
+}
+
+.batch-videos-count {
+  font-size: 0.8rem;
+  opacity: 0.6;
+  white-space: nowrap;
+}
+
+@media (max-width: 640px) {
+  .batch-actions,
+  .batch-actions--secondary {
+    flex-direction: column;
+  }
+
+  .batch-actions .btn-primary,
+  .batch-actions .btn-secondary,
+  .batch-actions--secondary .btn-primary,
+  .batch-actions--secondary .btn-secondary {
+    width: 100%;
+  }
 }
 
