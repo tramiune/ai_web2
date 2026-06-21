@@ -1245,6 +1245,24 @@ def start_bot_control_listener():
 
     db.collection('bots').document(BOT_NAME).on_snapshot(on_bot_config_snapshot)
 
+
+def _sync_engine_balances_for_admin():
+    try:
+        import engine_balance_report as ebr
+
+        ebr.sync_engine_balances_to_firestore(db, BOT_NAME)
+        print(f"📊 engineBalances → Firestore bots/{BOT_NAME} (Admin)")
+    except Exception as e:
+        print(f"⚠️ sync engineBalances: {e}")
+
+
+def _engine_balance_sync_loop():
+    interval = max(300, int(os.environ.get("ENGINE_BALANCE_SYNC_SEC", "1800")))
+    while True:
+        time.sleep(interval)
+        _sync_engine_balances_for_admin()
+
+
 def send_telegram_message(text):
     try:
         url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
@@ -2573,6 +2591,8 @@ def start_bot():
             print(f"⚠️  BOT_CDP_URL={cdp_url} nhưng Chrome chưa mở CDP!")
             print("    → Mở Chrome CDP ở terminal KHÁC trước, giữ chạy, rồi bot mới nối được.")
     start_bot_control_listener()
+    _sync_engine_balances_for_admin()
+    threading.Thread(target=_engine_balance_sync_loop, daemon=True).start()
     start_render_provider_listener()
     start_processing_listener()
     start_batch_channel_listener()

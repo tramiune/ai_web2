@@ -42,12 +42,10 @@ if ! grep -q "^BOT_MIN_RENDER_SEC=" "$ENV_FILE" 2>/dev/null; then
   ensure_env "BOT_MIN_RENDER_SEC" "300"
 fi
 
-echo "==> restart bot tmux"
+echo "==> restart bot (single instance)"
 tmux kill-session -t bot-http 2>/dev/null || true
-tmux new-session -d -s bot-http \
-  "bash -lc 'set -a; [ -f ~/ai_web2/.env ] && . ~/ai_web2/.env; set +a; export BOT_POLL_ACTIVE_SEC=30; cd ~/ai_web2 && exec python3 bot.py --name nhaycloud_vps_bot --mode http'"
+bash scripts/run-bot-single.sh nhaycloud_vps_bot --mode http
 
 sleep 2
-tmux ls
-ps aux | grep nhaycloud_vps_bot | grep -v grep || true
+pgrep -af 'bot.py --name nhaycloud_vps_bot' || true
 echo "==> xong. Admin web: Bots -> chọn XiaoYang cho đơn mới"

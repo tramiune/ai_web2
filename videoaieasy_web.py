@@ -405,6 +405,20 @@ def resolution_for_order(order_data: dict | None) -> str:
     return normalize_vae_resolution(None)
 
 
+def profile_credits(profile: dict | None) -> int:
+    if not profile:
+        return 0
+    for key in ("credits", "balance", "coin", "coins"):
+        val = profile.get(key)
+        if val is None:
+            continue
+        try:
+            return max(0, int(val))
+        except (TypeError, ValueError):
+            pass
+    return 0
+
+
 def vae_motion_api_model(model_id: str | None = None) -> str:
     """Gói Mượt & giữ mặt (127/129) + Tiết kiệm (128) → weavy-kling-26."""
     mid = str(model_id or "").strip()
