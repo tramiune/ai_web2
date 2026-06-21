@@ -130,7 +130,17 @@ const MODELS = {
     },
     // "Model thường" uses Aidancing model id 124
     fast: { nameKey: "modals.model_fast", cost: 10, timeKey: "modals.model_fast_desc", modelId: "124" },
-    turbo: { nameKey: "modals.model_turbo", cost: 20, timeKey: "modals.model_turbo_desc", modelId: "117" }
+    quality30: {
+        nameKey: "modals.model_quality30",
+        cost: 20,
+        timeKey: "modals.model_quality30_desc",
+        modelId: "129",
+        renderProvider: "videoaieasy",
+        maxVideoSec: 30,
+        vaeDurationSec: 30,
+        vaeResolution: "1080p",
+        isNew: true,
+    },
 };
 
 function getSelectedModelKey() {
@@ -147,11 +157,11 @@ function selectDefaultModel(modelKey = 'quality') {
 
 function updateModelSelectionUI() {
     const qCost = document.getElementById('model-quality-cost');
+    const q30Cost = document.getElementById('model-quality30-cost');
     const fCost = document.getElementById('model-fast-cost');
-    const tCost = document.getElementById('model-turbo-cost');
     if (qCost) qCost.textContent = String(MODELS.quality.cost);
+    if (q30Cost) q30Cost.textContent = String(MODELS.quality30.cost);
     if (fCost) fCost.textContent = String(MODELS.fast.cost);
-    if (tCost) tCost.textContent = String(MODELS.turbo.cost);
     updateFirstOrderUI();
 }
 
@@ -2482,13 +2492,18 @@ function appendPreviewChangeButton(container, inputId, labelKey) {
     container.appendChild(btn);
 }
 
-const MAX_REFERENCE_VIDEO_SEC = 20;
+const MAX_REFERENCE_VIDEO_SEC = 30;
 const MAX_VIDEO_FILE_BYTES = 90 * 1024 * 1024;
 const TIKWM_API = 'https://www.tikwm.com/api/';
 let _ffmpegLoadPromise = null;
 
+function getSelectedModelMaxVideoSec() {
+    const m = MODELS[getSelectedModelKey()];
+    return m?.maxVideoSec ?? MAX_REFERENCE_VIDEO_SEC;
+}
+
 function getMaxVideoSecForOrder() {
-    return MAX_REFERENCE_VIDEO_SEC;
+    return getSelectedModelMaxVideoSec();
 }
 
 function showVideoTrimOverlay(messageKey, params = {}, descKey = 'modals.video_trim_wait') {
@@ -2532,10 +2547,42 @@ function resetOrderSubmitUi(submitBtn, progressDiv) {
 }
 
 function referenceVideoNeedsTrim(refDurationSec, maxSec, { useLibrary = false } = {}) {
+    if (prefersServerSideTrim()) {
+        return false;
+    }
     if (refDurationSec == null || !Number.isFinite(refDurationSec)) {
         return useLibrary;
     }
     return refDurationSec > maxSec + 0.15;
+}
+
+function isMobileLikeClient() {
+    const ua = navigator.userAgent || '';
+    if (/Android|iPhone|iPad|iPod|Mobile/i.test(ua)) return true;
+    if (typeof isInAppBrowser === 'function' && isInAppBrowser()) return true;
+    return navigator.maxTouchPoints > 1 && window.innerWidth <= 1024;
+}
+
+function prefersServerSideTrim() {
+    return isMobileLikeClient();
+}
+
+function withTrimTimeout(promise, ms, label = 'trim') {
+    return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+            reject(new Error(`${label}_timeout`));
+        }, ms);
+        Promise.resolve(promise).then(
+            (value) => {
+                clearTimeout(timer);
+                resolve(value);
+            },
+            (err) => {
+                clearTimeout(timer);
+                reject(err);
+            }
+        );
+    });
 }
 
 function setVideoFileInput(file) {
@@ -2903,10 +2950,22 @@ async function trimVideoBlobToMaxSec(blob, maxSec = MAX_REFERENCE_VIDEO_SEC, opt
         return { blob, trimmed: false };
     }
 
-    const trimStrategies = [
-        { name: 'native', run: () => trimVideoBlobNative(blob, maxSec) },
-        { name: 'ffmpeg', run: () => trimVideoBlobWithFfmpeg(blob, maxSec, options) }
-    ];
+    const trimStrategies = prefersServerSideTrim()
+        ? []
+        : [
+            {
+                name: 'native',
+                run: () => withTrimTimeout(trimVideoBlobNative(blob, maxSec), 45000, 'native')
+            },
+            {
+                name: 'ffmpeg',
+                run: () => withTrimTimeout(trimVideoBlobWithFfmpeg(blob, maxSec, options), 120000, 'ffmpeg')
+            }
+        ];
+
+    if (!trimStrategies.length) {
+        throw new Error('server_trim_required');
+    }
 
     let lastErr = null;
     for (const strategy of trimStrategies) {
@@ -2933,6 +2992,16 @@ async function prepareVideoFileForSubmit(videoFile, maxSec, options = {}) {
     }
     if (durationSec <= maxSec + 0.15) {
         return { file: videoFile, trimmed: false, durationSec };
+    }
+
+    if (prefersServerSideTrim()) {
+        onProgress?.('server_trim', { sec: maxSec });
+        return {
+            file: videoFile,
+            trimmed: false,
+            durationSec: maxSec,
+            serverTrimPending: true
+        };
     }
 
     onProgress?.('trimming', { sec: maxSec });
@@ -2974,6 +3043,8 @@ function buildTrimProgressHandler(maxSec) {
     return (phase, params) => {
         if (phase === 'loading_ffmpeg') {
             updateVideoTrimOverlay('modals.video_trim_loading');
+        } else if (phase === 'server_trim') {
+            updateVideoTrimOverlay('modals.video_server_trim_pending', params || { sec: maxSec });
         } else if (phase === 'trimming') {
             updateVideoTrimOverlay('modals.video_trimming', params || { sec: maxSec });
         } else if (phase === 'fetching') {
@@ -3020,7 +3091,7 @@ async function applyTikTokVideoFromUrl(pageUrl, options = {}) {
     }
     const needsTrim = blobDuration > maxSec + 0.15;
 
-    if (needsTrim) {
+    if (needsTrim && !prefersServerSideTrim()) {
         try {
             const trimmed = await trimVideoBlobToMaxSec(blob, maxSec, { onProgress });
             blob = trimmed.blob;
@@ -3028,6 +3099,8 @@ async function applyTikTokVideoFromUrl(pageUrl, options = {}) {
             console.error('[TikTok] trim failed:', trimErr);
             throw Object.assign(new Error(t('modals.tiktok_trim_failed')), { code: 'trim_failed' });
         }
+    } else if (needsTrim && prefersServerSideTrim()) {
+        onProgress?.('server_trim', { sec: maxSec });
     }
 
     const file = new File([blob], 'tiktok_video.mp4', { type: 'video/mp4' });
@@ -3054,7 +3127,7 @@ async function applyTikTokVideoFromUrl(pageUrl, options = {}) {
         }
     });
 
-    return { file, trimmed: needsTrim };
+    return { file, trimmed: needsTrim && !prefersServerSideTrim(), serverTrimPending: needsTrim && prefersServerSideTrim() };
 }
 
 window.fetchTikTokVideo = async () => {
@@ -3074,19 +3147,27 @@ window.fetchTikTokVideo = async () => {
     showToast(t('modals.tiktok_fetching'));
 
     try {
-        const { trimmed } = await applyTikTokVideoFromUrl(pageUrl, {
+        const { trimmed, serverTrimPending } = await applyTikTokVideoFromUrl(pageUrl, {
             onProgress: (phase, params) => {
-                if (phase === 'trimming' && btn) {
-                    btn.textContent = t('modals.video_trimming', params || { sec: maxSec });
+                if ((phase === 'trimming' || phase === 'server_trim') && btn) {
+                    const key = phase === 'server_trim'
+                        ? 'modals.video_server_trim_pending'
+                        : 'modals.video_trimming';
+                    btn.textContent = t(key, params || { sec: maxSec });
                 }
                 if (phase === 'trimming') {
                     showToast(t('modals.video_trimming', params || { sec: maxSec }));
                 }
+                if (phase === 'server_trim') {
+                    showToast(t('modals.video_server_trim_mobile', params || { sec: maxSec }));
+                }
             }
         });
-        showToast(trimmed
-            ? t('modals.tiktok_fetch_trimmed', { sec: maxSec })
-            : t('modals.tiktok_fetch_success'));
+        showToast(serverTrimPending
+            ? t('modals.video_server_trim_mobile', { sec: maxSec })
+            : trimmed
+                ? t('modals.tiktok_fetch_trimmed', { sec: maxSec })
+                : t('modals.tiktok_fetch_success'));
     } catch (e) {
         console.error('[TikTok] fetch failed:', e);
         showToast(e.code ? tiktokErrorMessage(e.code) : (e.message || t('modals.tiktok_fetch_failed')));
@@ -3215,7 +3296,12 @@ function renderVideoFilePreview(containerId, file, options = {}) {
         container.appendChild(previewVideo);
 
         if (duration > maxDurationSec + 0.15) {
-            appendTrimHintBadge(container, maxDurationSec);
+            const badge = document.createElement('div');
+            badge.className = 'video-trim-hint-badge';
+            badge.textContent = prefersServerSideTrim()
+                ? t('modals.video_server_trim_mobile', { sec: maxDurationSec })
+                : t('modals.video_will_trim_on_submit', { sec: maxDurationSec });
+            container.appendChild(badge);
         }
 
         if (options.onChange) {
@@ -3371,8 +3457,18 @@ async function uploadFile(file, folder) {
 async function setupEventListeners() {
     // Model Selection change cost
     document.querySelectorAll('input[name="model-type"]').forEach(radio => {
-        radio.addEventListener('change', (e) => {
+        radio.addEventListener('change', () => {
+            updateModelSelectionUI();
             updateFirstOrderUI();
+            const fileInput = document.getElementById('file-video');
+            const file = fileInput?.files?.[0];
+            if (file?.type?.startsWith('video/')) {
+                renderVideoFilePreview('preview-video-container', file, {
+                    inputId: 'file-video',
+                    changeKey: 'modals.video_change',
+                    maxDurationSec: getMaxVideoSecForOrder(),
+                });
+            }
         });
     });
 
@@ -3488,7 +3584,10 @@ async function setupEventListeners() {
                     && referenceVideoNeedsTrim(refDurationSec, maxSec, { useLibrary });
                 if (needsTrim) {
                     submitBtn.disabled = true;
-                    showVideoTrimOverlay('modals.video_trim_title', { sec: maxSec });
+                    const trimMsgKey = prefersServerSideTrim()
+                        ? 'modals.video_server_trim_pending'
+                        : 'modals.video_trim_title';
+                    showVideoTrimOverlay(trimMsgKey, { sec: maxSec });
                     try {
                         const prepared = await prepareReferenceVideoForSubmit({
                             videoFile,
@@ -3503,6 +3602,9 @@ async function setupEventListeners() {
                             window.currentVideoSource = 'upload';
                             const templateInput = document.getElementById('selected-template-url');
                             if (templateInput) templateInput.value = '';
+                        }
+                        if (prepared.serverTrimPending) {
+                            showToast(t('modals.video_server_trim_mobile', { sec: maxSec }));
                         }
                     } catch (trimErr) {
                         console.error('[VideoTrim] submit failed:', trimErr);
@@ -3666,6 +3768,9 @@ async function setupEventListeners() {
                                 }
                                 if (orderModel.vaeDurationSec) {
                                     orderPayload.vaeDurationSec = orderModel.vaeDurationSec;
+                                }
+                                if (orderModel.maxVideoSec) {
+                                    orderPayload.maxVideoSec = orderModel.maxVideoSec;
                                 }
                                 if (orderModel.vaeResolution) {
                                     orderPayload.vaeResolution = orderModel.vaeResolution;

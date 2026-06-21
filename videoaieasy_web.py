@@ -33,7 +33,9 @@ MODEL_KLING_26 = "kling-2.6"
 MODEL_KLING_30 = "kling-3.0"
 DEFAULT_VAE_RESOLUTION = "720p"
 QUALITY_MODEL_IDS = frozenset({"127"})
+QUALITY_30_MODEL_IDS = frozenset({"129"})
 VAE_QUALITY_DURATION_SEC = 20
+VAE_QUALITY_30_DURATION_SEC = 30
 TURBO_MODEL_IDS = frozenset({"117", "125"})
 
 
@@ -389,7 +391,7 @@ def resolution_for_order(order_data: dict | None) -> str:
     if explicit:
         return normalize_vae_resolution(str(explicit))
     model_id = str(data.get("modelId") or "").strip()
-    if model_id in QUALITY_MODEL_IDS:
+    if model_id in QUALITY_MODEL_IDS or model_id in QUALITY_30_MODEL_IDS:
         return normalize_vae_resolution("1080p")
     if model_id in TURBO_MODEL_IDS:
         return normalize_vae_resolution("1080p")
@@ -406,6 +408,8 @@ def duration_for_order(order_data: dict | None) -> int:
             except (TypeError, ValueError):
                 pass
     model_id = str(data.get("modelId") or "").strip()
+    if model_id in QUALITY_30_MODEL_IDS:
+        return VAE_QUALITY_30_DURATION_SEC
     if model_id in QUALITY_MODEL_IDS:
         return VAE_QUALITY_DURATION_SEC
     return int(get_env("VIDEOAIEASY_DEFAULT_DURATION_SEC", "15"))

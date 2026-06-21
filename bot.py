@@ -29,6 +29,8 @@ from videoaieasy_web import (
     VideoAiEasyError,
     MODEL_KLING_26,
     MODEL_KLING_30,
+    QUALITY_MODEL_IDS,
+    QUALITY_30_MODEL_IDS,
     prepare_character_image_for_vae,
     resolution_for_order,
     duration_for_order,
@@ -79,7 +81,7 @@ _RENDER_PROVIDERS = (
     RENDER_PROVIDER_VIDEOAIEASY,
 )
 
-# Aidancing modelId trên web (script.js): fast=124/125, turbo=117
+# Aidancing modelId trên web (script.js): fast=124/125, quality30=129 (VAE)
 AIDANCING_TURBO_MODEL_IDS = frozenset({"117"})
 AIDANCING_FAST_MODEL_IDS = frozenset({"124", "125"})
 XIAOYANG_MODAL_STANDARD = "motion_v26"
@@ -246,6 +248,8 @@ def _use_videoaieasy() -> bool:
 
 def _videoaieasy_model_for_order(order_data: dict) -> str:
     model_id = str((order_data or {}).get("modelId") or "").strip()
+    if model_id in QUALITY_MODEL_IDS or model_id in QUALITY_30_MODEL_IDS:
+        return MODEL_KLING_26
     if model_id in AIDANCING_TURBO_MODEL_IDS:
         return MODEL_KLING_30
     return MODEL_KLING_26
@@ -1793,6 +1797,12 @@ def submit_to_xiaoyang(order_id, account):
                         time.sleep(2)
                     if not char_path or not vid_path:
                         raise XiaoyangWebError("Không tải được ảnh/video từ link đơn hàng")
+                    try:
+                        from order_media import trim_reference_video_for_order
+
+                        vid_path = trim_reference_video_for_order(vid_path, data)
+                    except Exception as trim_err:
+                        print(f"⚠️ Server trim thất bại {order_id}: {trim_err}")
                     print("📤 Upload ảnh lên xiaoyang.online...")
                     image_token = api.upload_file(char_path)
                     print("📤 Upload video motion...")
@@ -1941,6 +1951,12 @@ def submit_to_videoaieasy(order_id, account):
                     time.sleep(2)
                 if not char_path or not vid_path:
                     raise VideoAiEasyError("Không tải được ảnh/video từ link đơn hàng")
+                try:
+                    from order_media import trim_reference_video_for_order
+
+                    vid_path = trim_reference_video_for_order(vid_path, data)
+                except Exception as trim_err:
+                    print(f"⚠️ Server trim thất bại {order_id}: {trim_err}")
                 aspect = (data.get("aspectRatio") or "").strip() or "9:16"
                 vae_char_path, vae_char_tmp = prepare_character_image_for_vae(
                     char_path, aspect_ratio=aspect
@@ -2078,6 +2094,13 @@ def submit_to_aidancing(order_id, fallback_reason=None):
                 if char_path and os.path.exists(char_path): os.remove(char_path)
                 if vid_path and os.path.exists(vid_path): os.remove(vid_path)
                 return
+
+            try:
+                from order_media import trim_reference_video_for_order
+
+                vid_path = trim_reference_video_for_order(vid_path, data)
+            except Exception as trim_err:
+                print(f"⚠️ Server trim thất bại {order_id}: {trim_err}")
 
             if use_api_mode():
                 try:
@@ -2529,6 +2552,10 @@ def start_bot():
     if not BOT_NAME:
         print("❌ Tên bot không hợp lệ. Dùng: python bot.py --name aidancing-vps1")
         sys.exit(1)
+
+    from bot_singleton import acquire_bot_instance_lock
+
+    acquire_bot_instance_lock(BOT_NAME)
 
     print(f"📡 Wallpaper BOT [{BOT_NAME}] (v4.0 xy+ad - mode={os.environ.get('BOT_MODE', 'browser')}) đang khởi động...")
     cdp_url = os.environ.get("BOT_CDP_URL", "").strip()
