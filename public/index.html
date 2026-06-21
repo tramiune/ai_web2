@@ -1097,6 +1097,21 @@
                     <div class="form-group" id="model-selection-group">
                         <label data-i18n="modals.model_label">Chọn Model (Chất lượng)</label>
                         <div class="model-selection-grid">
+                            <label class="card compact-card model-card-pick model-card-economy" style="cursor: pointer; padding: 0.9rem; position: relative;">
+                                <span class="model-economy-badge" data-i18n="modals.model_economy_badge">TIẾT KIỆM</span>
+                                <input type="radio" name="model-type" value="economy">
+                                <div class="card-content-inline"
+                                    style="flex-direction: column; align-items: center; text-align: center; gap: 4px;">
+                                    <div style="font-weight: 800; font-size: 0.95rem;" data-i18n="modals.model_economy">
+                                        Tiết kiệm</div>
+                                    <div style="font-size: 0.72rem; opacity: 0.92;"
+                                        data-i18n="modals.model_economy_desc">Weavy Kling 2.6 · tối đa 10s · giữ mặt</div>
+                                    <div class="model-economy-price">
+                                        <span id="model-economy-cost">8</span>
+                                        <span style="font-size: 0.65rem; opacity: 0.9;">Coins</span>
+                                    </div>
+                                </div>
+                            </label>
                             <label class="card compact-card model-card-pick" style="cursor: pointer; padding: 0.8rem; position: relative;">
                                 <span class="model-new-badge" data-i18n="modals.model_new_badge">MỚI</span>
                                 <input type="radio" name="model-type" value="quality" checked>

@@ -31,6 +31,7 @@ from videoaieasy_web import (
     MODEL_KLING_30,
     QUALITY_MODEL_IDS,
     QUALITY_30_MODEL_IDS,
+    ECONOMY_MODEL_IDS,
     VAE_API_MODEL_WEAVY,
     prepare_character_image_for_vae,
     resolution_for_order,
@@ -250,7 +251,7 @@ def _use_videoaieasy() -> bool:
 
 def _videoaieasy_model_for_order(order_data: dict) -> str:
     model_id = str((order_data or {}).get("modelId") or "").strip()
-    if model_id in QUALITY_MODEL_IDS or model_id in QUALITY_30_MODEL_IDS:
+    if model_id in QUALITY_MODEL_IDS or model_id in QUALITY_30_MODEL_IDS or model_id in ECONOMY_MODEL_IDS:
         return VAE_API_MODEL_WEAVY
     if model_id in AIDANCING_TURBO_MODEL_IDS:
         return MODEL_KLING_30

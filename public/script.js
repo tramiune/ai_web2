@@ -117,6 +117,17 @@ function gatewayLabel(gateway) {
 }
 
 const MODELS = {
+    economy: {
+        nameKey: "modals.model_economy",
+        cost: 8,
+        timeKey: "modals.model_economy_desc",
+        modelId: "128",
+        renderProvider: "videoaieasy",
+        maxVideoSec: 10,
+        vaeDurationSec: 10,
+        vaeResolution: "1080p",
+        isEconomy: true,
+    },
     quality: {
         nameKey: "modals.model_quality",
         cost: 15,
@@ -156,9 +167,11 @@ function selectDefaultModel(modelKey = 'quality') {
 }
 
 function updateModelSelectionUI() {
+    const eCost = document.getElementById('model-economy-cost');
     const qCost = document.getElementById('model-quality-cost');
     const q30Cost = document.getElementById('model-quality30-cost');
     const fCost = document.getElementById('model-fast-cost');
+    if (eCost) eCost.textContent = String(MODELS.economy.cost);
     if (qCost) qCost.textContent = String(MODELS.quality.cost);
     if (q30Cost) q30Cost.textContent = String(MODELS.quality30.cost);
     if (fCost) fCost.textContent = String(MODELS.fast.cost);
