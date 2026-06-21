@@ -26,6 +26,7 @@ from xiaoyang_web import XiaoyangWebClient, XiaoyangAuthError as XiaoyangWebAuth
 from videoaieasy_web import (
     VideoAiEasyClient,
     VideoAiEasyAuthError,
+    VideoAiEasyCreditError,
     VideoAiEasyError,
     MODEL_KLING_26,
     MODEL_KLING_30,
@@ -34,10 +35,15 @@ from videoaieasy_web import (
     ECONOMY_MODEL_IDS,
     VAE_API_MODEL_WEAVY,
     prepare_character_image_for_vae,
+    prepare_motion_video_for_vae_upload,
+    profile_credits,
     resolution_for_order,
     duration_for_order,
+    vae_coins_for_duration,
     vae_motion_api_model,
+    vae_xu_for_duration,
 )
+from order_media import probe_video_duration_seconds
 
 # --- CONFIGURATION ---
 cred = credentials.Certificate("serviceAccountKey.json")
@@ -1947,23 +1953,29 @@ def submit_to_videoaieasy(order_id, account):
             vid_path = None
             vae_char_path = None
             vae_char_tmp = False
+            vid_upload_path = None
+            vid_upload_tmp = False
             try:
                 model_id = _videoaieasy_model_for_order(data)
                 resolution = resolution_for_order(data)
                 duration_sec = duration_for_order(data)
                 api_model = vae_motion_api_model(str(data.get("modelId") or ""))
-                tier = "weavy-kling" if api_model == VAE_API_MODEL_WEAVY else (
-                    "Kling 3.0" if model_id == MODEL_KLING_30 else "Kling 2.6"
-                )
+                vae_coins = vae_coins_for_duration(duration_sec, resolution)
+                vae_xu = vae_xu_for_duration(duration_sec, resolution)
                 prompt = (data.get("prompt") or get_env(
                     "VIDEOAIEASY_PROMPT", "Follow the reference motion naturally"
                 )).strip()
                 api = _get_vae_web_client(account_id)
-                _ensure_vae_web_session(api, account_email, account.get("password"))
+                profile = _ensure_vae_web_session(api, account_email, account.get("password"))
+                have = profile_credits(profile)
+                if have < vae_coins:
+                    raise VideoAiEasyCreditError(
+                        f"Không đủ coin VAE: cần {vae_coins} ({vae_xu:g} xu), có {have}"
+                    )
                 print(
-                    f"🚀 [VideoAiEasy/{nick_label}] {tier} — "
-                    f"modelId={data.get('modelId')} → {api_model} "
-                    f"{duration_sec}s {resolution}..."
+                    f"🚀 [VideoAiEasy/{nick_label}] {api_model} — "
+                    f"gói {duration_sec}s {resolution} ({vae_xu:g} xu / {vae_coins} coins, có {have}) · "
+                    f"modelId={data.get('modelId')} → VAE {api_model}..."
                 )
                 for attempt in range(1, 3):
                     if attempt > 1:
@@ -1975,20 +1987,23 @@ def submit_to_videoaieasy(order_id, account):
                     time.sleep(2)
                 if not char_path or not vid_path:
                     raise VideoAiEasyError("Không tải được ảnh/video từ link đơn hàng")
-                try:
-                    from order_media import trim_reference_video_for_order
-
-                    vid_path = trim_reference_video_for_order(vid_path, data)
-                except Exception as trim_err:
-                    print(f"⚠️ Server trim thất bại {order_id}: {trim_err}")
                 aspect = (data.get("aspectRatio") or "").strip() or "9:16"
                 vae_char_path, vae_char_tmp = prepare_character_image_for_vae(
                     char_path, aspect_ratio=aspect
                 )
+                vid_upload_path, vid_upload_tmp = prepare_motion_video_for_vae_upload(
+                    vid_path, max_seconds=duration_sec
+                )
+                probed = probe_video_duration_seconds(vid_upload_path)
+                if probed is not None:
+                    print(
+                        f"📏 Video upload VAE: {probed:.1f}s "
+                        f"(gói {duration_sec}s → {vae_xu_for_duration(duration_sec, resolution):g} xu)"
+                    )
                 print("📤 Upload ảnh lên videoaieasy.hdgr.online...")
                 image_url = api.upload_file(vae_char_path, kind="image")
                 print("📤 Upload video motion...")
-                video_url = api.upload_file(vid_path, kind="video")
+                video_url = api.upload_file(vid_upload_path, kind="video")
                 job_id = api.create_motion_job(
                     input_image_url=image_url,
                     driving_video_url=video_url,
@@ -2032,6 +2047,8 @@ def submit_to_videoaieasy(order_id, account):
             finally:
                 if vae_char_tmp and vae_char_path and os.path.exists(vae_char_path):
                     os.remove(vae_char_path)
+                if vid_upload_tmp and vid_upload_path and os.path.exists(vid_upload_path):
+                    os.remove(vid_upload_path)
                 if char_path and os.path.exists(char_path):
                     os.remove(char_path)
                 if vid_path and os.path.exists(vid_path):
