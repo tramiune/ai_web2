@@ -145,7 +145,7 @@ const MODELS = {
 
 function getSelectedModelKey() {
     const promo = getDailyPromoStatus(FB_CACHE.myOrders || [], FB_CACHE.userProfile);
-    if (promo.canUsePromo) return 'fast';
+    if (promo.canUsePromo) return DAILY_PROMO_MODEL_KEY;
     return document.querySelector('input[name="model-type"]:checked')?.value || 'quality';
 }
 
@@ -219,6 +219,7 @@ let dailyPromoRemaining = 0; // Số lượt 1 coin còn lại trong ngày (VN, 
 const DAILY_PROMO_COST = 1;
 const DAILY_PROMO_PER_DAY = 1;
 const DAILY_PROMO_MAX_TOTAL = 3;
+const DAILY_PROMO_MODEL_KEY = 'quality';
 const VN_TIMEZONE = 'Asia/Ho_Chi_Minh';
 
 function getVnDateString(date = new Date()) {
@@ -277,6 +278,13 @@ function resolvePromoCost(orders, baseCost, userData = null) {
         remainingToday: 1,
         remainingTotal: promo.remainingTotal - 1
     };
+}
+
+function modelForDailyPromoOrder() {
+    const model = { ...localizedModel(DAILY_PROMO_MODEL_KEY) };
+    model.cost = DAILY_PROMO_COST;
+    model.dailyPromo = true;
+    return model;
 }
 
 /** Trong Firestore transaction — dùng user doc + cache đơn (transaction.get chỉ nhận doc ref, không query). */
@@ -2420,8 +2428,9 @@ function updateFirstOrderUI() {
     const modelGroupEl = document.getElementById('model-selection-group');
     if (modelGroupEl) modelGroupEl.style.display = promo.canUsePromo ? 'none' : 'block';
 
-    const fastRadio = document.querySelector('input[name="model-type"][value="fast"]');
-    if (promo.canUsePromo && fastRadio) fastRadio.checked = true;
+    if (promo.canUsePromo) {
+        selectDefaultModel(DAILY_PROMO_MODEL_KEY);
+    }
 
     if (costEl) {
         const submitBtn = document.getElementById('order-submit-btn');
@@ -3528,7 +3537,7 @@ async function setupEventListeners() {
                 const tiktokUrl = document.getElementById('tiktok-video-url')?.value?.trim() || '';
                 const promoAtSubmit = getDailyPromoStatus(FB_CACHE.myOrders || [], FB_CACHE.userProfile);
                 const modelKeySelected = promoAtSubmit.canUsePromo
-                    ? 'fast'
+                    ? DAILY_PROMO_MODEL_KEY
                     : getSelectedModelKey();
                 const serviceType = document.querySelector('input[name="service-type"]:checked')?.value || 'motion-to-char';
                 let modelIdOverride = null;
@@ -3665,7 +3674,6 @@ async function setupEventListeners() {
                     const modelKey = modelKeySelected;
                     const baseModel = localizedModel(modelKey) || localizedModel('quality');
                     let model = { ...baseModel };
-                    if (modelIdOverride) model.modelId = modelIdOverride;
 
                     const userData = userDoc.data() || {};
                     const promoCounts = readPromoCountsInTransaction(
@@ -3673,8 +3681,11 @@ async function setupEventListeners() {
                     );
                     const canUsePromo = promoCounts.totalCount < DAILY_PROMO_MAX_TOTAL
                         && promoCounts.todayCount < DAILY_PROMO_PER_DAY;
-                    model.cost = canUsePromo ? DAILY_PROMO_COST : model.cost;
-                    model.dailyPromo = canUsePromo;
+                    if (canUsePromo) {
+                        model = modelForDailyPromoOrder();
+                    } else if (modelIdOverride) {
+                        model.modelId = modelIdOverride;
+                    }
                     if (canUsePromo) {
                         console.log(`🎁 Ưu đãi ngày (tx): còn ${DAILY_PROMO_MAX_TOTAL - promoCounts.totalCount} lượt @ ${DAILY_PROMO_COST} coin`);
                     }
@@ -3730,7 +3741,6 @@ async function setupEventListeners() {
                                 const modelKey = modelKeySelected;
                                 const baseModel = localizedModel(modelKey) || localizedModel('quality');
                                 let orderModel = { ...baseModel };
-                                if (modelIdOverride) orderModel.modelId = modelIdOverride;
 
                                 const userData = userDoc.data() || {};
                                 const promoCounts = readPromoCountsInTransaction(
@@ -3738,6 +3748,11 @@ async function setupEventListeners() {
                                 );
                                 const canUsePromo = promoCounts.totalCount < DAILY_PROMO_MAX_TOTAL
                                     && promoCounts.todayCount < DAILY_PROMO_PER_DAY;
+                                if (canUsePromo) {
+                                    orderModel = modelForDailyPromoOrder();
+                                } else if (modelIdOverride) {
+                                    orderModel.modelId = modelIdOverride;
+                                }
                                 const finalCost = canUsePromo ? DAILY_PROMO_COST : orderModel.cost;
                                 const isDailyPromo = canUsePromo;
                                 const currentCoins = userData.coins || 0;

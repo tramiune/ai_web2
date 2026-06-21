@@ -34,6 +34,7 @@ MODEL_KLING_30 = "kling-3.0"
 DEFAULT_VAE_RESOLUTION = "720p"
 QUALITY_MODEL_IDS = frozenset({"127"})
 QUALITY_30_MODEL_IDS = frozenset({"129"})
+VAE_API_MODEL_WEAVY = "weavy-kling-26"
 VAE_QUALITY_DURATION_SEC = 20
 VAE_QUALITY_30_DURATION_SEC = 30
 TURBO_MODEL_IDS = frozenset({"117", "125"})
@@ -309,19 +310,23 @@ class VideoAiEasyClient:
         model_id: str = MODEL_KLING_26,
         resolution: str | None = None,
         duration_sec: int | None = None,
+        api_model: str | None = None,
     ) -> str:
+        res = normalize_vae_resolution(resolution)
+        vae_model = (api_model or model_id or MODEL_KLING_26).strip()
         body = {
             "mode": "motion-control",
-            "modelId": model_id,
+            "modelId": vae_model,
             "prompt": (prompt or get_env(
                 "VIDEOAIEASY_PROMPT", "Follow the reference motion naturally"
             )).strip(),
             "inputImageUrl": input_image_url.strip(),
             "drivingVideoUrl": driving_video_url.strip(),
-            "resolution": normalize_vae_resolution(resolution),
         }
         if duration_sec is not None:
             body["durationSec"] = int(duration_sec)
+        if vae_model != VAE_API_MODEL_WEAVY:
+            body["resolution"] = res
         resp = self._api(
             "POST",
             "/api/jobs",
@@ -396,6 +401,14 @@ def resolution_for_order(order_data: dict | None) -> str:
     if model_id in TURBO_MODEL_IDS:
         return normalize_vae_resolution("1080p")
     return normalize_vae_resolution(None)
+
+
+def vae_motion_api_model(model_id: str | None = None) -> str:
+    """Gói Mượt & giữ mặt (127/129) → weavy-kling-26."""
+    mid = str(model_id or "").strip()
+    if mid in QUALITY_MODEL_IDS or mid in QUALITY_30_MODEL_IDS:
+        return VAE_API_MODEL_WEAVY
+    return MODEL_KLING_26
 
 
 def duration_for_order(order_data: dict | None) -> int:

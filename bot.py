@@ -31,9 +31,11 @@ from videoaieasy_web import (
     MODEL_KLING_30,
     QUALITY_MODEL_IDS,
     QUALITY_30_MODEL_IDS,
+    VAE_API_MODEL_WEAVY,
     prepare_character_image_for_vae,
     resolution_for_order,
     duration_for_order,
+    vae_motion_api_model,
 )
 
 # --- CONFIGURATION ---
@@ -249,7 +251,7 @@ def _use_videoaieasy() -> bool:
 def _videoaieasy_model_for_order(order_data: dict) -> str:
     model_id = str((order_data or {}).get("modelId") or "").strip()
     if model_id in QUALITY_MODEL_IDS or model_id in QUALITY_30_MODEL_IDS:
-        return MODEL_KLING_26
+        return VAE_API_MODEL_WEAVY
     if model_id in AIDANCING_TURBO_MODEL_IDS:
         return MODEL_KLING_30
     return MODEL_KLING_26
@@ -1930,7 +1932,10 @@ def submit_to_videoaieasy(order_id, account):
                 model_id = _videoaieasy_model_for_order(data)
                 resolution = resolution_for_order(data)
                 duration_sec = duration_for_order(data)
-                tier = "Kling 3.0" if model_id == MODEL_KLING_30 else "Kling 2.6"
+                api_model = vae_motion_api_model(str(data.get("modelId") or ""))
+                tier = "weavy-kling" if api_model == VAE_API_MODEL_WEAVY else (
+                    "Kling 3.0" if model_id == MODEL_KLING_30 else "Kling 2.6"
+                )
                 prompt = (data.get("prompt") or get_env(
                     "VIDEOAIEASY_PROMPT", "Follow the reference motion naturally"
                 )).strip()
@@ -1938,7 +1943,7 @@ def submit_to_videoaieasy(order_id, account):
                 _ensure_vae_web_session(api, account_email, account.get("password"))
                 print(
                     f"🚀 [VideoAiEasy/{nick_label}] {tier} — "
-                    f"modelId={data.get('modelId')} → {model_id} "
+                    f"modelId={data.get('modelId')} → {api_model} "
                     f"{duration_sec}s {resolution}..."
                 )
                 for attempt in range(1, 3):
@@ -1972,6 +1977,7 @@ def submit_to_videoaieasy(order_id, account):
                     model_id=model_id,
                     resolution=resolution,
                     duration_sec=duration_sec,
+                    api_model=api_model,
                 )
                 print(f"🆔 [VideoAiEasy/{nick_label}] job: {job_id}")
                 _mark_order_processing(
