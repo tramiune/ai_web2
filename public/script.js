@@ -3501,6 +3501,19 @@ async function setupEventListeners() {
                 return;
             }
 
+            if ((Number(window.__currentUserData?.coins) || 0) < 1) {
+                window.niceConfirm({
+                    title: t('modals.insufficient_coins_title'),
+                    message: t('modals.insufficient_coins_msg'),
+                    icon: '💰',
+                    onConfirm: () => {
+                        closeModal('order-modal');
+                        if (window.openPricingModal) window.openPricingModal();
+                    }
+                });
+                return;
+            }
+
             const { db, doc, collection, runTransaction, serverTimestamp } = window.firebase;
             const submitBtn = document.getElementById('order-submit-btn');
             const progressDiv = document.getElementById('upload-progress');
