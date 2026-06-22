@@ -261,7 +261,7 @@ def create_batch_order(
         "maxVideoSec": BATCH_MAX_VIDEO_SEC,
         "clientVersion": APP_CLIENT_VERSION,
         "serviceType": "motion-to-char",
-        "serviceLabel": "AI Copy Chuyển Động Vào Ảnh (20s · VAE weavy-kling-26)",
+        "serviceLabel": "AI Copy Chuyển Động Vào Ảnh (20s)",
         "costCoins": 0,
         "characterImageLink": char_url,
         "referenceVideoLink": video_url,

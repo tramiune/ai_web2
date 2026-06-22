@@ -3992,6 +3992,21 @@ function loadMyOrders() {
     }));
 }
 
+/** Nhãn dịch vụ trên thẻ đơn — không lộ engine (VAE/weavy/XiaoYang…). */
+function userFacingServiceLabel(order) {
+    const raw = (order && (order.serviceLabel || order.packageName)) || '';
+    if (!raw) return '';
+    return String(raw)
+        .replace(/\s*[·•|]\s*VAE\b.*$/i, '')
+        .replace(/\s*[·•|]\s*weavy[\w-]*/gi, '')
+        .replace(/\bVideoAiEasy\b/gi, '')
+        .replace(/\bXiaoYang\b/gi, '')
+        .replace(/\bAidancing\b/gi, '')
+        .replace(/\s{2,}/g, ' ')
+        .replace(/\s*[·•|]\s*$/g, '')
+        .trim();
+}
+
 /** Ghi chú đơn hiển thị cho khách — không lộ engine render (Aidancing/XiaoYang). */
 function userFacingOrderNote(order) {
     const raw = (order && order.systemNote) || '';
@@ -4034,7 +4049,7 @@ function buildOrderCardHtml(d) {
                     <span class="order-id-text">#${escapeHTML(orderId)}</span>
                     <span class="order-date-text">${escapeHTML(date)}</span>
                 </div>
-                <div class="order-type-text">${escapeHTML(d.serviceLabel || d.packageName || '')}</div>
+                <div class="order-type-text">${escapeHTML(userFacingServiceLabel(d))}</div>
                 ${delayNote}
                 ${userFacingOrderNote(d) ? `<div class="order-system-note">💬 ${escapeHTML(userFacingOrderNote(d))}</div>` : ''}
                 <div class="order-footer">
