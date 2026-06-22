@@ -52,7 +52,12 @@ BATCH_MODEL_ID = "127"
 BATCH_VAE_DURATION_SEC = 20
 BATCH_VAE_RESOLUTION = "1080p"
 BATCH_MAX_VIDEO_SEC = 20
+BATCH_ORDER_COST_COINS = 15  # Gói Mượt & giữ mặt (model 127)
 STALE_RUNNING_RUN_HOURS = 3
+
+
+class InsufficientCoinsError(RuntimeError):
+    """User không đủ coin trước khi batch tạo ảnh / đơn."""
 
 try:
     from zoneinfo import ZoneInfo
@@ -262,7 +267,7 @@ def create_batch_order(
         "clientVersion": APP_CLIENT_VERSION,
         "serviceType": "motion-to-char",
         "serviceLabel": "AI Copy Chuyển Động Vào Ảnh (20s)",
-        "costCoins": 0,
+        "costCoins": BATCH_ORDER_COST_COINS,
         "characterImageLink": char_url,
         "referenceVideoLink": video_url,
         "aspectRatio": "9:16",
@@ -295,6 +300,32 @@ def _extract_outfit_frame(video_path: str, tmp: str, vid_key: str, cfg: dict) ->
     raise RuntimeError(f"frame_extract_failed: {last_err}")
 
 
+def _refund_user_coins(db, user_id: str, amount: int) -> None:
+    if amount <= 0 or not user_id:
+        return
+    db.collection("users").document(user_id).update({"coins": firestore.Increment(amount)})
+    print(f"💰 Hoàn {amount} coin cho user {user_id}")
+
+
+def _deduct_user_coins(db, user_id: str, amount: int) -> None:
+    if amount <= 0:
+        return
+    if not user_id:
+        raise InsufficientCoinsError(f"Không đủ coin: cần {amount}, có 0")
+    user_ref = db.collection("users").document(user_id)
+
+    @firestore.transactional
+    def _deduct_tx(transaction):
+        snap = user_ref.get(transaction=transaction)
+        current = int((snap.to_dict() or {}).get("coins") or 0) if snap.exists else 0
+        if current < amount:
+            raise InsufficientCoinsError(f"Không đủ coin: cần {amount}, có {current}")
+        transaction.update(user_ref, {"coins": current - amount})
+
+    _deduct_tx(db.transaction())
+    print(f"💳 Trừ {amount} coin — user {user_id}")
+
+
 def _process_video_item(
     vae_client: VideoAiEasyClient,
     db,
@@ -320,21 +351,29 @@ def _process_video_item(
         print(f"▶️ Nguồn {item_key}...")
         download_file(video_url, video_local, referer=referer)
         frame_local = _extract_outfit_frame(video_local, tmp, item_key, cfg)
-        char_url = run_wardrobe_vae(
-            vae_client, template_url, frame_local, tmp=tmp, wardrobe_replace=wardrobe_mode,
-        )
-        motion_url = upload_motion_video(video_local)
-        order_id = create_batch_order(
-            db,
-            admin_uid=admin_uid,
-            admin_email=admin_email,
-            admin_name=admin_name,
-            char_url=char_url,
-            video_url=motion_url,
-            batch_run_id=run_ref.id,
-            source_video_id=source_video_id,
-            source_order_id=source_order_id,
-        )
+        coins_deducted = False
+        try:
+            _deduct_user_coins(db, admin_uid, BATCH_ORDER_COST_COINS)
+            coins_deducted = True
+            char_url = run_wardrobe_vae(
+                vae_client, template_url, frame_local, tmp=tmp, wardrobe_replace=wardrobe_mode,
+            )
+            motion_url = upload_motion_video(video_local)
+            order_id = create_batch_order(
+                db,
+                admin_uid=admin_uid,
+                admin_email=admin_email,
+                admin_name=admin_name,
+                char_url=char_url,
+                video_url=motion_url,
+                batch_run_id=run_ref.id,
+                source_video_id=source_video_id,
+                source_order_id=source_order_id,
+            )
+        except Exception:
+            if coins_deducted:
+                _refund_user_coins(db, admin_uid, BATCH_ORDER_COST_COINS)
+            raise
         item["status"] = "order_created"
         item["orderId"] = order_id
         item["characterImageLink"] = char_url

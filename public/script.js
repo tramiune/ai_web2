@@ -6699,6 +6699,30 @@ function batchChannelRunNowMode() {
     return getBatchSourceModeFromUI() === 'orders' ? 'orders' : 'full';
 }
 
+function batchChannelPerVideoCost() {
+    return MODELS.quality.cost;
+}
+
+async function ensureBatchChannelCoins(triggerRun) {
+    if (!triggerRun || !currentUser) return true;
+    const cost = batchChannelPerVideoCost();
+    const { db, doc, getDoc } = window.firebase;
+    let coins = Number(FB_CACHE.userProfile?.coins);
+    try {
+        const snap = await getDoc(doc(db, 'users', currentUser.uid));
+        if (snap.exists()) {
+            coins = Number(snap.data().coins);
+        }
+    } catch (e) {
+        console.warn('[BatchChannel] coin check:', e);
+    }
+    if (!Number.isFinite(coins) || coins < cost) {
+        showToast(t('build_channel.status_insufficient_coins', { cost }));
+        return false;
+    }
+    return true;
+}
+
 async function persistBatchChannelConfig({ enable, triggerRun = false }) {
     if (!currentUser) {
         showToast(t('common.toast_login_required'));
@@ -6718,6 +6742,9 @@ async function persistBatchChannelConfig({ enable, triggerRun = false }) {
     }
     if (sourceMode === 'orders' && !selectedOrderIds.length) {
         showToast(t('build_channel.status_need_orders'));
+        return false;
+    }
+    if (!(await ensureBatchChannelCoins(triggerRun))) {
         return false;
     }
 

@@ -102,6 +102,7 @@ window.TRANSLATIONS = {
             status_run_now_need_save: "Chọn ảnh nhân vật + link TikTok trước.",
             status_saved: "Đã lưu cài đặt.",
             status_need_template: "Vui lòng chọn ảnh nhân vật.",
+            status_insufficient_coins: "Không đủ Coin — cần {cost} Coin cho mỗi video. Vui lòng nạp thêm.",
             status_need_channel: "Vui lòng dán link kênh TikTok.",
             status_need_orders: "Vui lòng chọn ít nhất một đơn nguồn.",
             status_login_required: "Vui lòng đăng nhập để dùng tính năng này."
@@ -871,6 +872,7 @@ window.TRANSLATIONS = {
             status_run_now_need_save: "Choose character photo + TikTok link first.",
             status_saved: "Settings saved.",
             status_need_template: "Please choose a character photo.",
+            status_insufficient_coins: "Not enough coins — {cost} coins required per video. Please top up.",
             status_need_channel: "Please paste a TikTok channel link.",
             status_need_orders: "Please select at least one source order.",
             status_login_required: "Please sign in to use this feature."
