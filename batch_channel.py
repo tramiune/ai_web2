@@ -3,9 +3,9 @@
 Batch kênh TikTok (Nhay Cloud) — chạy cron 3:00 Asia/Ho_Chi_Minh.
 
 Pipeline mỗi video đăng ngày hôm qua (VN):
-  tải video → cắt frame t=1s → XiaoYang thay đồ → tạo đơn motion pending.
+  tải video → cắt frame → VAE thay đồ full bộ → tạo đơn motion pending (weavy-kling 20s).
 
-Cần .env: XIAOYANG_ACCOUNTS (nick web như bot) + R2_* + serviceAccountKey.json
+Cần .env: VIDEOAIEASY_ACCOUNTS + R2_* + serviceAccountKey.json
 """
 
 from __future__ import annotations
@@ -29,8 +29,16 @@ from project_env import get_env, load_project_env
 
 load_project_env()
 
+from client_version import APP_CLIENT_VERSION
+from videoaieasy_web import (
+    VideoAiEasyClient,
+    VideoAiEasyAuthError,
+    VideoAiEasyError,
+    get_batch_vae_client,
+    normalize_vae_public_url,
+    poll_vae_job,
+)
 from xiaoyang_direct import DirectMediaError, upload_result_file
-from xiaoyang_web import XiaoyangAuthError, XiaoyangWebClient, XiaoyangWebError
 
 ROOT = Path(__file__).resolve().parent
 CONFIG_DOC = "default"  # legacy admin doc; user configs use Firebase uid
@@ -38,6 +46,13 @@ CONFIG_COLLECTION = "batchChannelConfig"
 RUNS_COLLECTION = "batchChannelRuns"
 TIKWM_USER_POSTS = "https://www.tikwm.com/api/user/posts"
 VN_TZ = "Asia/Ho_Chi_Minh"
+# Đơn batch → VAE weavy-kling-26, gói 20s (MODELS.quality / modelId 127)
+BATCH_RENDER_PROVIDER = "videoaieasy"
+BATCH_MODEL_ID = "127"
+BATCH_VAE_DURATION_SEC = 20
+BATCH_VAE_RESOLUTION = "1080p"
+BATCH_MAX_VIDEO_SEC = 20
+STALE_RUNNING_RUN_HOURS = 3
 
 try:
     from zoneinfo import ZoneInfo
@@ -139,68 +154,6 @@ def apply_yesterday_video_limit(videos: list[dict], cfg: dict | None) -> list[di
     return ordered
 
 
-def _xiaoyang_account_id(email: str) -> str:
-    return re.sub(r"[^a-z0-9_-]", "_", (email or "default").split("@")[0].lower())
-
-
-def load_xy_accounts() -> list[dict]:
-    """Cùng format bot.py — XIAOYANG_ACCOUNTS hoặc XIAOYANG_EMAIL/PASSWORD."""
-    accounts: list[dict] = []
-    raw = (get_env("XIAOYANG_ACCOUNTS") or "").strip()
-    if raw:
-        if raw.startswith("["):
-            try:
-                for item in json.loads(raw):
-                    email = (item.get("email") or "").strip()
-                    password = item.get("password") or ""
-                    if email and password:
-                        accounts.append({
-                            "id": _xiaoyang_account_id(email),
-                            "email": email,
-                            "password": password,
-                        })
-            except Exception as e:
-                print(f"⚠️ XIAOYANG_ACCOUNTS JSON lỗi: {e}")
-        else:
-            for part in raw.split(","):
-                part = part.strip()
-                if ":" not in part:
-                    continue
-                email, password = part.split(":", 1)
-                email, password = email.strip(), password.strip()
-                if email and password:
-                    accounts.append({
-                        "id": _xiaoyang_account_id(email),
-                        "email": email,
-                        "password": password,
-                    })
-    if not accounts:
-        email = (get_env("XIAOYANG_EMAIL") or "").strip()
-        password = get_env("XIAOYANG_PASSWORD") or ""
-        if email and password:
-            accounts.append({
-                "id": _xiaoyang_account_id(email),
-                "email": email,
-                "password": password,
-            })
-    return accounts
-
-
-def get_batch_xy_client() -> tuple[XiaoyangWebClient, dict]:
-    accounts = load_xy_accounts()
-    if not accounts:
-        raise RuntimeError("Thiếu XIAOYANG_ACCOUNTS / XIAOYANG_EMAIL trong .env (nick web bot)")
-    acc = accounts[0]
-    client = XiaoyangWebClient(account_id=acc["id"])
-    try:
-        client.me()
-    except XiaoyangAuthError:
-        client.login(email=acc["email"], password=acc["password"])
-        client.me()
-    print(f"🔑 XiaoYang web: {acc['email']} ({acc['id']})")
-    return client, acc
-
-
 def download_file(url: str, dest: str, *, referer: str = "https://www.tiktok.com/") -> str:
     dest = os.path.abspath(dest)
     os.makedirs(os.path.dirname(dest) or ".", exist_ok=True)
@@ -230,23 +183,12 @@ def extract_frame_at_sec(video_path: str, out_image: str, sec: float = 1.0) -> s
     return out_image
 
 
-def poll_xy_task(client, task_id: str, *, label: str, timeout_sec: int = 1800) -> dict:
-    deadline = time.time() + timeout_sec
-    while time.time() < deadline:
-        t = client.get_task(task_id)
-        st = (t.get("status") or "").upper()
-        print(f"   [{label}] task {task_id}: {st}")
-        if st == "SUCCESS":
-            return t
-        if st == "FAIL":
-            raise RuntimeError(t.get("error_message") or f"task {task_id} FAIL")
-        time.sleep(20)
-    raise TimeoutError(f"task {task_id} timeout")
-
-
 def _wardrobe_replace_mode(cfg: dict | None = None) -> str:
     """Luôn thay nguyên bộ (full outfit) — không chỉ áo hoặc quần riêng lẻ."""
-    _ = cfg
+    if cfg:
+        mode = (cfg.get("wardrobeReplace") or "").strip().lower()
+        if mode in ("full", "upper", "lower"):
+            return mode
     return "full"
 
 
@@ -269,8 +211,8 @@ def _frame_seconds(cfg: dict | None = None) -> list[float]:
     return out
 
 
-def run_wardrobe_web(
-    client: XiaoyangWebClient,
+def run_wardrobe_vae(
+    client: VideoAiEasyClient,
     template_url: str,
     clothes_path: str,
     *,
@@ -279,24 +221,19 @@ def run_wardrobe_web(
 ) -> str:
     template_path = os.path.join(tmp, "batch_template.png")
     download_file(template_url, template_path, referer="https://nhay.cloud/")
-    print(f"👗 Thay đồ XiaoYang (wardrobe_replace={wardrobe_replace})...")
-    image_token = client.upload_file(template_path)
-    clothes_token = client.upload_file(clothes_path)
-    resp = client.create_wardrobe_task(
-        image_token=image_token,
-        clothes_image_token=clothes_token,
+    print(f"👗 Thay đồ VAE (wardrobe_replace={wardrobe_replace})...")
+    person_url = client.upload_file(template_path, kind="image")
+    clothes_url = client.upload_file(clothes_path, kind="image")
+    job_id = client.create_wardrobe_job(
+        person_image_url=person_url,
+        clothes_image_url=clothes_url,
         wardrobe_replace=wardrobe_replace,
     )
-    task_id = str(resp.get("task_id") or "").strip()
-    if not task_id:
-        raise RuntimeError(f"wardrobe no task_id: {resp}")
-    poll_xy_task(client, task_id, label="wardrobe")
-    out_path = os.path.join(tmp, f"wardrobe_{task_id}.png")
-    client.download_task_file(task_id, out_path)
-    url = upload_result_file(out_path, folder="characters", content_type="image/png")
-    if not url:
-        raise RuntimeError("upload wardrobe result failed")
-    return url
+    job = poll_vae_job(client, job_id, label="wardrobe")
+    out_url = normalize_vae_public_url(job.get("output_video_url"))
+    if not out_url:
+        raise RuntimeError("wardrobe no output url")
+    return out_url
 
 
 def create_batch_order(
@@ -317,9 +254,14 @@ def create_batch_order(
         "userEmail": admin_email or "",
         "userName": admin_name or "Admin",
         "packageName": "Xây kênh tự động",
-        "modelId": "124",
+        "modelId": BATCH_MODEL_ID,
+        "renderProvider": BATCH_RENDER_PROVIDER,
+        "vaeDurationSec": BATCH_VAE_DURATION_SEC,
+        "vaeResolution": BATCH_VAE_RESOLUTION,
+        "maxVideoSec": BATCH_MAX_VIDEO_SEC,
+        "clientVersion": APP_CLIENT_VERSION,
         "serviceType": "motion-to-char",
-        "serviceLabel": "AI Copy Chuyển Động Vào Ảnh (20s)",
+        "serviceLabel": "AI Copy Chuyển Động Vào Ảnh (20s · VAE weavy-kling-26)",
         "costCoins": 0,
         "characterImageLink": char_url,
         "referenceVideoLink": video_url,
@@ -354,7 +296,7 @@ def _extract_outfit_frame(video_path: str, tmp: str, vid_key: str, cfg: dict) ->
 
 
 def _process_video_item(
-    xy_client: XiaoyangWebClient,
+    vae_client: VideoAiEasyClient,
     db,
     *,
     cfg: dict,
@@ -378,8 +320,8 @@ def _process_video_item(
         print(f"▶️ Nguồn {item_key}...")
         download_file(video_url, video_local, referer=referer)
         frame_local = _extract_outfit_frame(video_local, tmp, item_key, cfg)
-        char_url = run_wardrobe_web(
-            xy_client, template_url, frame_local, tmp=tmp, wardrobe_replace=wardrobe_mode,
+        char_url = run_wardrobe_vae(
+            vae_client, template_url, frame_local, tmp=tmp, wardrobe_replace=wardrobe_mode,
         )
         motion_url = upload_motion_video(video_local)
         order_id = create_batch_order(
@@ -462,12 +404,33 @@ def _trigger_config_run(db, config_id: str, cfg: dict) -> int:
     return run_batch(force=True, test_latest=1, manual=True, config_id=config_id)
 
 
+def _close_stale_running_runs(db, *, max_age_hours: int = STALE_RUNNING_RUN_HOURS) -> int:
+    """Đóng batch zombie (status=running quá lâu) để không chặn hàng đợi."""
+    cutoff_ts = time.time() - max_age_hours * 3600
+    closed = 0
+    for snap in db.collection(RUNS_COLLECTION).where("status", "==", "running").stream():
+        data = snap.to_dict() or {}
+        started_ts = _firestore_ts_seconds(data.get("startedAt"))
+        if not started_ts or started_ts >= cutoff_ts:
+            continue
+        snap.reference.update({
+            "status": "failed",
+            "finishedAt": firestore.SERVER_TIMESTAMP,
+            "errors": (data.get("errors") or []) + ["stale_run_auto_closed"],
+            "lastError": f"Batch kẹt > {max_age_hours}h — đã đóng tự động",
+        })
+        closed += 1
+        print(f"🧹 Đóng batch zombie {snap.id}")
+    return closed
+
+
 def poll_run_now_trigger() -> int:
     """Cron mỗi phút — chạy batch khi user bấm Chạy thử / Làm ngay trên web."""
     if not firebase_admin._apps:
         cred = credentials.Certificate(str(ROOT / "serviceAccountKey.json"))
         firebase_admin.initialize_app(cred)
     db = firestore.client()
+    _close_stale_running_runs(db)
     pending = _pending_run_now_configs(db)
     if not pending:
         return 0
@@ -544,9 +507,9 @@ def run_batch(
         return 0
 
     try:
-        xy_client, xy_acc = get_batch_xy_client()
-    except (XiaoyangWebError, XiaoyangAuthError, RuntimeError) as e:
-        print(f"❌ Không đăng nhập XiaoYang web: {e}")
+        vae_client, _vae_acc = get_batch_vae_client()
+    except (VideoAiEasyError, VideoAiEasyAuthError, RuntimeError) as e:
+        print(f"❌ Không đăng nhập VAE: {e}")
         return 1
 
     template_url = (cfg.get("templateImageUrl") or "").strip()
@@ -632,7 +595,7 @@ def run_batch(
                     continue
                 try:
                     item = _process_video_item(
-                        xy_client, db,
+                        vae_client, db,
                         cfg=cfg,
                         template_url=template_url,
                         admin_uid=admin_uid,
@@ -681,7 +644,7 @@ def run_batch(
                     continue
                 try:
                     item = _process_video_item(
-                        xy_client, db,
+                        vae_client, db,
                         cfg=cfg,
                         template_url=template_url,
                         admin_uid=admin_uid,
