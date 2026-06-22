@@ -1602,8 +1602,7 @@ async function handleUserLoggedIn(user) {
             window.__isAdmin = isAdmin;
             window.__isSuperAdmin = isSuperAdmin;
 
-            const batchChannelItem = document.getElementById('user-dropdown-item-batch-channel');
-            if (batchChannelItem) batchChannelItem.style.display = 'flex';
+            updateBatchChannelNewBadge();
 
             if (isAdmin) {
                 const adminProfileItem = document.getElementById('admin-dropdown-item-profile');
@@ -1664,7 +1663,8 @@ function navigateFromURLParam() {
         } else if (page === 'admin-panel' && window.__isAdmin) {
             showAdminPanel();
         } else if (page === 'build-channel-page' && currentUser) {
-            showBuildChannel();
+            showDashboard();
+            window.openBatchChannelModal();
         } else if (page === 'user-dashboard') {
             showDashboard();
         } else {
@@ -1748,6 +1748,7 @@ function showDashboard() {
     hideAllPages();
     document.getElementById('user-dashboard').style.display = 'block';
     window.scrollTo(0, 0);
+    updateBatchChannelNewBadge();
 }
 
 function showTopupHistory() {
@@ -1757,16 +1758,34 @@ function showTopupHistory() {
 }
 
 function showBuildChannel() {
+    window.openBatchChannelModal();
+}
+
+function updateBatchChannelNewBadge() {
+    const btn = document.getElementById('home-auto-video-btn');
+    if (!btn) return;
+    let seen = false;
+    try {
+        seen = localStorage.getItem(BATCH_CHANNEL_NEW_KEY) === '1';
+    } catch (_) { /* ignore */ }
+    btn.classList.toggle('has-new-badge', !seen);
+}
+
+window.openBatchChannelModal = () => {
     if (!currentUser) {
         showToast(t('common.toast_login_required'));
-        showDashboard();
         return;
     }
-    hideAllPages();
-    document.getElementById('build-channel-page').style.display = 'block';
-    window.scrollTo(0, 0);
+    if (blockIfUpgradeMaintenance()) return;
+    try {
+        localStorage.setItem(BATCH_CHANNEL_NEW_KEY, '1');
+    } catch (_) { /* ignore */ }
+    updateBatchChannelNewBadge();
     loadBatchChannelPage();
-}
+    window.openModal('batch-channel-modal');
+};
+
+window.showBuildChannel = showBuildChannel;
 
 function showAdminPanel() {
     hideAllPages();
@@ -1783,7 +1802,7 @@ function showLanding() {
 }
 
 function hideAllPages() {
-    const pages = ['landing-page', 'user-dashboard', 'topup-history-page', 'admin-panel', 'build-channel-page', 'referral-page'];
+    const pages = ['landing-page', 'user-dashboard', 'topup-history-page', 'admin-panel', 'referral-page'];
     pages.forEach(id => {
         const el = document.getElementById(id);
         if (el) el.style.display = 'none';
@@ -1836,7 +1855,8 @@ window.navTo = (target) => {
     } else if (target === 'topup-history-page') {
         showTopupHistory();
     } else if (target === 'build-channel-page') {
-        showBuildChannel();
+        showDashboard();
+        window.openBatchChannelModal();
     } else if (target === 'referral-page') {
         showReferralPage();
     } else if (target === 'admin-panel') {
@@ -6523,7 +6543,8 @@ async function payReferralCommissionClient(topupId, referredUserId, baseCoins, g
 }
 window.payReferralCommissionClient = payReferralCommissionClient;
 
-// --- Batch channel (mọi user đăng nhập) ---
+// --- Batch channel (modal on home) ---
+const BATCH_CHANNEL_NEW_KEY = 'nhay_batch_auto_video_seen_v1';
 const BATCH_CHANNEL_CRON_HOUR_DEFAULT = 3;
 let _batchChannelPickerOrders = [];
 let _batchChannelCfg = null;
@@ -6607,22 +6628,6 @@ function renderBatchChannelOrderPicker(orders, selectedIds = []) {
             <span class="status-badge status-${escapeHTML(o.status || 'pending')}">${escapeHTML(STATUS_MAP()[o.status] || o.status || '')}</span>
         </label>`;
     }).join('');
-}
-
-function renderBatchChannelVideosGrid(orders) {
-    const grid = document.getElementById('batch-channel-videos-grid');
-    const countEl = document.getElementById('batch-channel-videos-count');
-    if (!grid) return;
-    if (!orders.length) {
-        grid.innerHTML = `<div style="grid-column: 1/-1; text-align:center; opacity: 0.5; padding: 4rem 2rem; background: rgba(255,255,255,0.02); border-radius: 16px; border: 1px dashed var(--glass-border);">
-            <div style="font-size: 3rem; margin-bottom: 1rem;">🎬</div>
-            <div>${t('build_channel.videos_empty')}</div>
-        </div>`;
-        if (countEl) countEl.textContent = '';
-        return;
-    }
-    if (countEl) countEl.textContent = `${orders.length} video`;
-    grid.innerHTML = orders.map((o) => buildOrderCardHtml(o)).join('');
 }
 
 function isBatchDailyChecked() {
@@ -6811,6 +6816,7 @@ async function persistBatchChannelConfig({ enable, triggerRun = false }) {
         if (fileInput) fileInput.value = '';
         if (triggerRun) {
             showToast(t('build_channel.status_run_now_queued'));
+            closeModal('batch-channel-modal');
         } else if (enable) {
             showToast(t('build_channel.status_schedule_on', { hour: getBatchCronHour() }));
         } else {
@@ -6938,8 +6944,6 @@ async function loadBatchChannelPage() {
 
     fbUnsub('batchChannelOrdersPick');
     fbUnsub('batchChannelOrdersPickFallback');
-    fbUnsub('batchChannelOrdersGallery');
-    fbUnsub('batchChannelOrdersGalleryFallback');
     const pickQ = query(
         collection(db, 'orders'),
         where('userId', '==', currentUser.uid),
@@ -6961,31 +6965,6 @@ async function loadBatchChannelPage() {
                     .filter((o) => o.userId === currentUser.uid)
                     .filter((o) => (o.characterImageLink || '').trim() && (o.referenceVideoLink || '').trim());
                 renderBatchChannelOrderPicker(_batchChannelPickerOrders, getBatchSelectedOrderIds());
-            }));
-        }
-    }));
-
-    const galleryQ = query(
-        collection(db, 'orders'),
-        where('userId', '==', currentUser.uid),
-        orderBy('createdAt', 'desc'),
-        limit(100)
-    );
-    fbSub('batchChannelOrdersGallery', onSnapshot(galleryQ, (snap) => {
-        const rows = snap.docs
-            .map((d) => ({ id: d.id, ...d.data() }))
-            .filter((o) => o.isBatchChannel && (o.characterImageLink || o.resultLink));
-        renderBatchChannelVideosGrid(rows);
-    }, (err) => {
-        console.error('[BatchChannel] videos grid:', err);
-        if (err?.code === 'failed-precondition') {
-            const fallbackQ = query(collection(db, 'orders'), orderBy('createdAt', 'desc'), limit(150));
-            fbSub('batchChannelOrdersGalleryFallback', onSnapshot(fallbackQ, (snap) => {
-                const rows = snap.docs
-                    .map((d) => ({ id: d.id, ...d.data() }))
-                    .filter((o) => o.userId === currentUser.uid)
-                    .filter((o) => o.isBatchChannel && (o.characterImageLink || o.resultLink));
-                renderBatchChannelVideosGrid(rows);
             }));
         }
     }));
