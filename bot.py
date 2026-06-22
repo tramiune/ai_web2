@@ -116,7 +116,7 @@ _xy_inflight = {}
 _xy_inflight_lock = threading.Lock()
 _xy_accounts_cache = None
 _xy_accounts_cache_lock = threading.Lock()
-VIDEOAIEASY_MAX_CONCURRENT_PER_ACCOUNT = int(get_env("VIDEOAIEASY_MAX_CONCURRENT", "4"))
+VIDEOAIEASY_MAX_CONCURRENT_PER_ACCOUNT = int(get_env("VIDEOAIEASY_MAX_CONCURRENT", "50"))
 _vae_web_clients = {}
 _vae_web_clients_lock = threading.Lock()
 _vae_inflight = {}
@@ -2556,29 +2556,30 @@ def _run_batch_channel_trigger():
 
 
 def start_batch_channel_listener():
-    """Admin bấm「Chạy thử ngay」trên web → bot chạy batch ngay (không chờ 3h)."""
-    doc_ref = db.collection("batchChannelConfig").document("default")
+    """User bấm Chạy thử / Làm ngay trên web → bot chạy batch (mọi user có config riêng)."""
+    col_ref = db.collection("batchChannelConfig")
 
-    def on_snapshot(keys, changes, read_time):
+    def on_snapshot(col_snapshot, changes, read_time):
         if not changes:
             return
-        data = {}
         for change in changes:
             doc = change.document
-            if getattr(doc, "exists", False):
-                data = doc.to_dict() or {}
+            if not getattr(doc, "exists", False):
+                continue
+            data = doc.to_dict() or {}
+            requested = data.get("runNowRequestedAt")
+            if not requested:
+                continue
+            handled = data.get("runNowHandledAt")
+            if _firestore_ts_seconds(handled) >= _firestore_ts_seconds(requested):
+                continue
+            owner = (data.get("createdBy") or doc.id).strip() or doc.id
+            print(f"🚀 batch channel — lệnh chạy từ user {owner}")
+            threading.Thread(target=_run_batch_channel_trigger, daemon=True).start()
             break
-        requested = data.get("runNowRequestedAt")
-        if not requested:
-            return
-        handled = data.get("runNowHandledAt")
-        if _firestore_ts_seconds(handled) >= _firestore_ts_seconds(requested):
-            return
-        print("🚀 batch channel — nhận lệnh「Chạy thử ngay」từ web")
-        threading.Thread(target=_run_batch_channel_trigger, daemon=True).start()
 
-    doc_ref.on_snapshot(on_snapshot)
-    print("👂 Lắng nghe batchChannelConfig — nút「Chạy thử ngay」trên web")
+    col_ref.on_snapshot(on_snapshot)
+    print("👂 Lắng nghe batchChannelConfig — Chạy thử / Làm ngay (mọi user)")
 
 
 def start_bot():

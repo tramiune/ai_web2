@@ -33,7 +33,7 @@ from xiaoyang_direct import DirectMediaError, upload_result_file
 from xiaoyang_web import XiaoyangAuthError, XiaoyangWebClient, XiaoyangWebError
 
 ROOT = Path(__file__).resolve().parent
-CONFIG_DOC = "default"
+CONFIG_DOC = "default"  # legacy admin doc; user configs use Firebase uid
 CONFIG_COLLECTION = "batchChannelConfig"
 RUNS_COLLECTION = "batchChannelRuns"
 TIKWM_USER_POSTS = "https://www.tikwm.com/api/user/posts"
@@ -245,11 +245,9 @@ def poll_xy_task(client, task_id: str, *, label: str, timeout_sec: int = 1800) -
 
 
 def _wardrobe_replace_mode(cfg: dict | None = None) -> str:
-    if cfg:
-        mode = (cfg.get("wardrobeReplace") or "").strip()
-        if mode:
-            return mode
-    return (get_env("XIAOYANG_WARDROBE_REPLACE") or "full").strip() or "full"
+    """Luôn thay nguyên bộ (full outfit) — không chỉ áo hoặc quần riêng lẻ."""
+    _ = cfg
+    return "full"
 
 
 def _frame_seconds(cfg: dict | None = None) -> list[float]:
@@ -318,10 +316,10 @@ def create_batch_order(
         "userId": admin_uid,
         "userEmail": admin_email or "",
         "userName": admin_name or "Admin",
-        "packageName": "Batch kênh TikTok",
+        "packageName": "Xây kênh tự động",
         "modelId": "124",
         "serviceType": "motion-to-char",
-        "serviceLabel": "AI Copy Chuyển Động Vào Ảnh (30s)",
+        "serviceLabel": "AI Copy Chuyển Động Vào Ảnh (20s)",
         "costCoins": 0,
         "characterImageLink": char_url,
         "referenceVideoLink": video_url,
@@ -421,22 +419,57 @@ def _firestore_ts_seconds(ts) -> float:
         return 0.0
 
 
+def _pending_run_now_configs(db) -> list[tuple[str, dict]]:
+    pending: list[tuple[str, dict]] = []
+    for snap in db.collection(CONFIG_COLLECTION).stream():
+        if not snap.exists:
+            continue
+        cfg = snap.to_dict() or {}
+        requested = cfg.get("runNowRequestedAt")
+        if not requested:
+            continue
+        handled = cfg.get("runNowHandledAt")
+        if _firestore_ts_seconds(handled) >= _firestore_ts_seconds(requested):
+            continue
+        pending.append((snap.id, cfg))
+    return pending
+
+
+def _trigger_config_run(db, config_id: str, cfg: dict) -> int:
+    mode = (cfg.get("runNowMode") or "test").strip().lower()
+    if (
+        mode == "full"
+        and (get_env("BATCH_RUN_NOW_USE_TEST") or "").strip().lower() in ("1", "true", "yes")
+    ):
+        print("🧪 BATCH_RUN_NOW_USE_TEST=1 — run now dùng 1 video mới nhất (local dev)")
+        mode = "test"
+    db.collection(CONFIG_COLLECTION).document(config_id).update({"runNowHandledAt": cfg.get("runNowRequestedAt")})
+    order_ids = [str(x).strip() for x in (cfg.get("selectedOrderIds") or []) if str(x).strip()]
+    owner = (cfg.get("createdBy") or config_id).strip() or config_id
+    if mode == "orders":
+        print(f"🚀 [{owner}] Làm ngay — {len(order_ids)} đơn nguồn.")
+        return run_batch(
+            force=True,
+            manual=True,
+            source_mode="orders",
+            order_ids=order_ids,
+            config_id=config_id,
+        )
+    if mode == "full":
+        print(f"🚀 [{owner}] Làm ngay — batch video hôm qua.")
+        return run_batch(force=True, manual=True, config_id=config_id)
+    print(f"🚀 [{owner}] Chạy thử — 1 video.")
+    return run_batch(force=True, test_latest=1, manual=True, config_id=config_id)
+
+
 def poll_run_now_trigger() -> int:
-    """Cron mỗi phút — chạy batch khi admin bấm「Chạy thử ngay」trên web."""
+    """Cron mỗi phút — chạy batch khi user bấm Chạy thử / Làm ngay trên web."""
     if not firebase_admin._apps:
         cred = credentials.Certificate(str(ROOT / "serviceAccountKey.json"))
         firebase_admin.initialize_app(cred)
     db = firestore.client()
-    cfg_ref = db.collection(CONFIG_COLLECTION).document(CONFIG_DOC)
-    cfg_snap = cfg_ref.get()
-    if not cfg_snap.exists:
-        return 0
-    cfg = cfg_snap.to_dict() or {}
-    requested = cfg.get("runNowRequestedAt")
-    if not requested:
-        return 0
-    handled = cfg.get("runNowHandledAt")
-    if _firestore_ts_seconds(handled) >= _firestore_ts_seconds(requested):
+    pending = _pending_run_now_configs(db)
+    if not pending:
         return 0
     running = (
         db.collection(RUNS_COLLECTION)
@@ -447,46 +480,42 @@ def poll_run_now_trigger() -> int:
     if any(True for _ in running):
         print("⏳ Batch đang chạy — bỏ qua trigger mới.")
         return 0
-    mode = (cfg.get("runNowMode") or "test").strip().lower()
-    cfg_ref.update({"runNowHandledAt": requested})
-    order_ids = [str(x).strip() for x in (cfg.get("selectedOrderIds") or []) if str(x).strip()]
-    if mode == "orders":
-        print(f"🚀 Trigger「Làm ngay / copy đơn」— {len(order_ids)} đơn.")
-        return run_batch(force=True, manual=True, source_mode="orders", order_ids=order_ids)
-    if mode == "full":
-        print("🚀 Trigger「Làm ngay」— batch đầy đủ (video hôm qua).")
-        return run_batch(force=True, manual=True)
-    print("🚀 Trigger「Chạy thử」— 1 video mới nhất.")
-    return run_batch(force=True, test_latest=1, manual=True)
+    rc = 0
+    for config_id, cfg in pending:
+        rc = max(rc, _trigger_config_run(db, config_id, cfg))
+    return rc
 
 
 def run_daily_hourly() -> int:
-    """Cron mỗi giờ — chạy khi đúng cronHour (VN) và enabled."""
+    """Cron mỗi giờ — chạy mọi user config đang bật đúng cronHour (VN)."""
     if not firebase_admin._apps:
         cred = credentials.Certificate(str(ROOT / "serviceAccountKey.json"))
         firebase_admin.initialize_app(cred)
     db = firestore.client()
-    cfg_ref = db.collection(CONFIG_COLLECTION).document(CONFIG_DOC)
-    cfg_snap = cfg_ref.get()
-    if not cfg_snap.exists:
-        return 0
-    cfg = cfg_snap.to_dict() or {}
-    if not cfg.get("enabled"):
-        return 0
-    try:
-        cron_hour = int(cfg.get("cronHour") if cfg.get("cronHour") is not None else 3)
-    except (TypeError, ValueError):
-        cron_hour = 3
-    cron_hour = max(0, min(23, cron_hour))
-    if _vn_now().hour != cron_hour:
-        return 0
+    now_hour = _vn_now().hour
     y_date = (_vn_now().date() - timedelta(days=1)).isoformat()
-    if cfg.get("lastDailyCronDateVN") == y_date:
-        return 0
-    print(f"⏰ Cron batch kênh — {cron_hour}:00 VN, ngày video {y_date}")
-    rc = run_batch(force=False, manual=False)
-    if rc == 0:
-        cfg_ref.update({"lastDailyCronDateVN": y_date})
+    rc = 0
+    for snap in db.collection(CONFIG_COLLECTION).stream():
+        if not snap.exists:
+            continue
+        cfg = snap.to_dict() or {}
+        if not cfg.get("enabled"):
+            continue
+        try:
+            cron_hour = int(cfg.get("cronHour") if cfg.get("cronHour") is not None else 3)
+        except (TypeError, ValueError):
+            cron_hour = 3
+        cron_hour = max(0, min(23, cron_hour))
+        if now_hour != cron_hour:
+            continue
+        if cfg.get("lastDailyCronDateVN") == y_date:
+            continue
+        owner = (cfg.get("createdBy") or snap.id).strip() or snap.id
+        print(f"⏰ Cron batch kênh [{owner}] — {cron_hour}:00 VN, video {y_date}")
+        one_rc = run_batch(force=False, manual=False, config_id=snap.id)
+        rc = max(rc, one_rc)
+        if one_rc == 0:
+            snap.reference.update({"lastDailyCronDateVN": y_date})
     return rc
 
 
@@ -497,15 +526,17 @@ def run_batch(
     manual: bool = False,
     source_mode: str | None = None,
     order_ids: list[str] | None = None,
+    config_id: str = CONFIG_DOC,
 ) -> int:
     if not firebase_admin._apps:
         cred = credentials.Certificate(str(ROOT / "serviceAccountKey.json"))
         firebase_admin.initialize_app(cred)
     db = firestore.client()
 
-    cfg_snap = db.collection(CONFIG_COLLECTION).document(CONFIG_DOC).get()
+    cfg_ref = db.collection(CONFIG_COLLECTION).document(config_id)
+    cfg_snap = cfg_ref.get()
     if not cfg_snap.exists:
-        print("⏭️ Chưa có batchChannelConfig — bỏ qua.")
+        print(f"⏭️ Chưa có batchChannelConfig/{config_id} — bỏ qua.")
         return 0
     cfg = cfg_snap.to_dict() or {}
     if not manual and not cfg.get("enabled"):
@@ -539,12 +570,13 @@ def run_batch(
         recent = (
             db.collection(RUNS_COLLECTION)
             .where("dateVN", "==", y_date)
+            .where("configId", "==", config_id)
             .where("status", "==", "completed")
             .limit(1)
             .stream()
         )
         if any(True for _ in recent):
-            print(f"⏭️ Đã chạy batch cho ngày {y_date}.")
+            print(f"⏭️ Đã chạy batch cho ngày {y_date} (config {config_id}).")
             return 0
 
     username = parse_tiktok_username(channel) if channel else ""
@@ -557,6 +589,8 @@ def run_batch(
         "isManualTest": bool(manual or test_latest),
         "testLatest": int(test_latest or 0),
         "yesterdayVideoCount": _yesterday_video_limit(cfg),
+        "userId": admin_uid,
+        "configId": config_id,
         "startedAt": firestore.SERVER_TIMESTAMP,
         "videosFound": 0,
         "ordersCreated": 0,
@@ -585,6 +619,11 @@ def run_batch(
                     run_ref.update({"items": items, "ordersCreated": orders_created, "errors": errors})
                     continue
                 od = snap.to_dict() or {}
+                if (od.get("userId") or "").strip() != admin_uid:
+                    errors.append(f"{oid}: not_owner")
+                    items.append({"videoId": oid, "status": "error", "error": "not_owner", "orderId": ""})
+                    run_ref.update({"items": items, "ordersCreated": orders_created, "errors": errors})
+                    continue
                 video_url = (od.get("referenceVideoLink") or "").strip()
                 if not video_url:
                     errors.append(f"{oid}: no_reference_video")
@@ -669,7 +708,7 @@ def run_batch(
             "errors": errors,
             "items": items,
         })
-        db.collection(CONFIG_COLLECTION).document(CONFIG_DOC).update({
+        cfg_ref.update({
             "lastRunAt": firestore.SERVER_TIMESTAMP,
             "lastRunStatus": "completed",
             "lastRunMessage": f"{orders_created} đơn, {len(errors)} lỗi",
@@ -683,7 +722,7 @@ def run_batch(
             "finishedAt": firestore.SERVER_TIMESTAMP,
             "errors": errors + [str(e)],
         })
-        db.collection(CONFIG_COLLECTION).document(CONFIG_DOC).update({
+        cfg_ref.update({
             "lastRunAt": firestore.SERVER_TIMESTAMP,
             "lastRunStatus": "failed",
             "lastRunMessage": str(e),

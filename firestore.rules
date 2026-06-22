@@ -69,14 +69,16 @@ service cloud.firestore {
       allow create: if false;
     }
 
-    // Xây kênh tự động — admin setup + nút「Chạy thử ngay」
+    // Xây kênh tự động — mọi user đăng nhập (config theo uid)
     match /batchChannelConfig/{docId} {
-      allow read, write: if isAdmin();
+      allow read, write: if isAdmin()
+        || (request.auth != null && request.auth.uid == docId);
     }
 
-    // Lịch sử batch — admin xem; cron/bot ghi qua service account
+    // Lịch sử batch — user xem run của mình; cron/bot ghi qua service account
     match /batchChannelRuns/{runId} {
-      allow read: if isAdmin();
+      allow read: if isAdmin()
+        || (request.auth != null && resource.data.userId == request.auth.uid);
       allow create, update, delete: if false;
     }
 

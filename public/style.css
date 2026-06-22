@@ -4962,6 +4962,59 @@ body.video-trim-active {
   font-size: 1.05rem;
 }
 
+.batch-steps {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 0.5rem;
+}
+
+.batch-step {
+  display: flex;
+  gap: 0.85rem;
+  margin-bottom: 1.15rem;
+  align-items: flex-start;
+}
+
+.batch-step-num {
+  flex-shrink: 0;
+  width: 1.75rem;
+  height: 1.75rem;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.82rem;
+  font-weight: 800;
+  background: rgba(138, 43, 226, 0.22);
+  border: 1px solid rgba(138, 43, 226, 0.45);
+  color: #fff;
+  margin-top: 0.1rem;
+}
+
+.batch-step-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.batch-advanced {
+  margin-top: 0.5rem;
+  border-top: 1px solid var(--glass-border);
+  padding-top: 0.75rem;
+}
+
+.batch-advanced summary {
+  cursor: pointer;
+  font-size: 0.82rem;
+  font-weight: 600;
+  opacity: 0.75;
+  user-select: none;
+  margin-bottom: 0.75rem;
+}
+
+.batch-advanced-body {
+  padding-top: 0.25rem;
+}
+
 .batch-status-chip {
   display: inline-flex;
   align-items: center;
@@ -5059,6 +5112,21 @@ body.video-trim-active {
   gap: 0.75rem;
   flex-wrap: wrap;
   margin-top: 1rem;
+}
+
+.batch-daily-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  margin-top: 0.85rem;
+  font-size: 0.92rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.batch-daily-row input {
+  margin-top: 0.2rem;
+  accent-color: var(--primary, #7c5cff);
 }
 
 .batch-actions--secondary {
@@ -5164,7 +5232,8 @@ body.video-trim-active {
   .batch-actions .btn-primary,
   .batch-actions .btn-secondary,
   .batch-actions--secondary .btn-primary,
-  .batch-actions--secondary .btn-secondary {
+  .batch-actions--secondary .btn-secondary,
+  #batch-channel-main-btn {
     width: 100%;
   }
 }

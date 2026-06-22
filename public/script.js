@@ -1602,11 +1602,12 @@ async function handleUserLoggedIn(user) {
             window.__isAdmin = isAdmin;
             window.__isSuperAdmin = isSuperAdmin;
 
+            const batchChannelItem = document.getElementById('user-dropdown-item-batch-channel');
+            if (batchChannelItem) batchChannelItem.style.display = 'flex';
+
             if (isAdmin) {
                 const adminProfileItem = document.getElementById('admin-dropdown-item-profile');
                 if (adminProfileItem) adminProfileItem.style.display = 'flex';
-                const batchChannelItem = document.getElementById('admin-dropdown-item-batch-channel');
-                if (batchChannelItem) batchChannelItem.style.display = 'flex';
                 const adminDivider = document.getElementById('admin-dropdown-divider');
                 if (adminDivider) adminDivider.style.display = 'block';
 
@@ -1627,8 +1628,6 @@ async function handleUserLoggedIn(user) {
             } else {
                 const adminProfileItem = document.getElementById('admin-dropdown-item-profile');
                 if (adminProfileItem) adminProfileItem.style.display = 'none';
-                const batchChannelItem = document.getElementById('admin-dropdown-item-batch-channel');
-                if (batchChannelItem) batchChannelItem.style.display = 'none';
                 const adminDivider = document.getElementById('admin-dropdown-divider');
                 if (adminDivider) adminDivider.style.display = 'none';
 
@@ -1664,6 +1663,8 @@ function navigateFromURLParam() {
             showTopupHistory();
         } else if (page === 'admin-panel' && window.__isAdmin) {
             showAdminPanel();
+        } else if (page === 'build-channel-page' && currentUser) {
+            showBuildChannel();
         } else if (page === 'user-dashboard') {
             showDashboard();
         } else {
@@ -1714,6 +1715,8 @@ function handleUserLoggedOut(autoGoogleSignIn = false) {
     if (referralPage) referralPage.style.display = 'none';
     const adminProfileItem = document.getElementById('admin-dropdown-item-profile');
     if (adminProfileItem) adminProfileItem.style.display = 'none';
+    const batchChannelItem = document.getElementById('user-dropdown-item-batch-channel');
+    if (batchChannelItem) batchChannelItem.style.display = 'none';
     const adminDivider = document.getElementById('admin-dropdown-divider');
     if (adminDivider) adminDivider.style.display = 'none';
 
@@ -1754,8 +1757,8 @@ function showTopupHistory() {
 }
 
 function showBuildChannel() {
-    if (!window.__isAdmin) {
-        showToast(t('build_channel.status_admin_only'));
+    if (!currentUser) {
+        showToast(t('common.toast_login_required'));
         showDashboard();
         return;
     }
@@ -6505,9 +6508,14 @@ async function payReferralCommissionClient(topupId, referredUserId, baseCoins, g
 }
 window.payReferralCommissionClient = payReferralCommissionClient;
 
-// --- Batch channel (admin) ---
-const BATCH_CHANNEL_CONFIG_ID = 'default';
+// --- Batch channel (mọi user đăng nhập) ---
+const BATCH_CHANNEL_CRON_HOUR_DEFAULT = 3;
 let _batchChannelPickerOrders = [];
+let _batchChannelCfg = null;
+
+function getBatchChannelConfigId() {
+    return currentUser?.uid || '';
+}
 
 function parseTikTokUsername(raw) {
     const s = (raw || '').trim();
@@ -6602,39 +6610,225 @@ function renderBatchChannelVideosGrid(orders) {
     grid.innerHTML = orders.map((o) => buildOrderCardHtml(o)).join('');
 }
 
+function isBatchDailyChecked() {
+    return !!document.getElementById('batch-daily-checkbox')?.checked;
+}
+
+function getBatchCronHour() {
+    const raw = parseInt(document.getElementById('batch-cron-hour')?.value, 10);
+    if (!Number.isFinite(raw)) return BATCH_CHANNEL_CRON_HOUR_DEFAULT;
+    return Math.max(0, Math.min(23, raw));
+}
+
+function syncBatchDailyScheduleUI(cfg) {
+    const wrap = document.getElementById('batch-cron-hour-wrap');
+    const show = isBatchDailyChecked();
+    if (wrap) wrap.style.display = show ? 'block' : 'none';
+    updateBatchChannelMainButton(cfg ?? _batchChannelCfg);
+}
+
+async function persistBatchChannelCronHourOnly() {
+    if (!currentUser || !_batchChannelCfg?.enabled) return;
+    const configId = getBatchChannelConfigId();
+    if (!configId) return;
+    const { db, doc, setDoc, serverTimestamp } = window.firebase;
+    const cronHour = getBatchCronHour();
+    try {
+        await setDoc(doc(db, 'batchChannelConfig', configId), {
+            cronHour,
+            updatedAt: serverTimestamp(),
+        }, { merge: true });
+    } catch (e) {
+        console.error('[BatchChannel] cron hour:', e);
+    }
+}
+
+function updateBatchChannelMainButton(cfg) {
+    const btn = document.getElementById('batch-channel-main-btn');
+    if (!btn) return;
+    btn.disabled = false;
+    btn.classList.remove('btn-secondary');
+    btn.classList.add('btn-primary');
+    btn.style.background = '';
+    btn.style.borderColor = '';
+
+    if (batchChannelRunNowPending(cfg)) {
+        btn.disabled = true;
+        btn.textContent = t('build_channel.btn_running');
+        return;
+    }
+
+    const daily = isBatchDailyChecked();
+    if (daily && cfg?.enabled) {
+        btn.textContent = t('build_channel.btn_stop');
+        btn.classList.remove('btn-primary');
+        btn.classList.add('btn-secondary');
+        btn.style.background = '#c0392b';
+        btn.style.borderColor = '#c0392b';
+        return;
+    }
+    if (daily) {
+        btn.textContent = t('build_channel.btn_schedule', { hour: getBatchCronHour() });
+        return;
+    }
+    btn.textContent = t('build_channel.btn_run_now');
+}
+
+function syncBatchDailyCheckboxFromCfg(cfg) {
+    const box = document.getElementById('batch-daily-checkbox');
+    if (!box) return;
+    box.checked = !!cfg?.enabled;
+}
+
+function batchChannelRunNowMode() {
+    return getBatchSourceModeFromUI() === 'orders' ? 'orders' : 'full';
+}
+
+async function persistBatchChannelConfig({ enable, triggerRun = false }) {
+    if (!currentUser) {
+        showToast(t('common.toast_login_required'));
+        return false;
+    }
+    const configId = getBatchChannelConfigId();
+    if (!configId) return false;
+    const { db, doc, getDoc, setDoc, serverTimestamp } = window.firebase;
+    const channelUrl = document.getElementById('batch-channel-url')?.value?.trim() || '';
+    const username = parseTikTokUsername(channelUrl);
+    const sourceMode = getBatchSourceModeFromUI();
+    const selectedOrderIds = getBatchSelectedOrderIds();
+
+    if (sourceMode === 'tiktok' && !username) {
+        showToast(t('build_channel.status_need_channel'));
+        return false;
+    }
+    if (sourceMode === 'orders' && !selectedOrderIds.length) {
+        showToast(t('build_channel.status_need_orders'));
+        return false;
+    }
+
+    let templateImageUrl = '';
+    let existingStartedAt = null;
+    try {
+        const existing = await getDoc(doc(db, 'batchChannelConfig', configId));
+        if (existing.exists()) {
+            const d = existing.data();
+            templateImageUrl = d.templateImageUrl || '';
+            existingStartedAt = d.startedAt || null;
+        }
+    } catch (_) { /* ignore */ }
+
+    const fileInput = document.getElementById('batch-template-input');
+    const file = fileInput?.files?.[0];
+    const needsTemplate = enable || triggerRun;
+    if (needsTemplate && file) {
+        try {
+            templateImageUrl = await uploadFile(file, 'characters');
+            const preview = document.getElementById('batch-template-preview');
+            if (preview) {
+                preview.innerHTML = `<img src="${escapeHTML(templateImageUrl)}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:12px;">`;
+                document.getElementById('batch-template-zone')?.classList.add('has-preview');
+            }
+        } catch (e) {
+            console.error('[BatchChannel] upload template:', e);
+            showToast(e.message || t('upload.error_network'));
+            return false;
+        }
+    }
+    if (needsTemplate && !templateImageUrl) {
+        showToast(t('build_channel.status_need_template'));
+        return false;
+    }
+
+    const payload = {
+        enabled: !!enable,
+        channelUrl,
+        channelUsername: username,
+        templateImageUrl,
+        sourceMode,
+        cronHour: getBatchCronHour(),
+        yesterdayVideoCount: getBatchYesterdayVideoCount(),
+        wardrobeReplace: 'full',
+        frameSec: 2.5,
+        selectedOrderIds,
+        createdBy: currentUser.uid,
+        createdByEmail: currentUser.email || '',
+        createdByName: currentUser.displayName || userDisplayLabel(currentUser),
+        updatedAt: serverTimestamp(),
+    };
+    if (enable && !existingStartedAt) {
+        payload.startedAt = serverTimestamp();
+    }
+    if (triggerRun) {
+        payload.enabled = false;
+        payload.runNowRequestedAt = serverTimestamp();
+        payload.runNowMode = batchChannelRunNowMode();
+    }
+
+    try {
+        await setDoc(doc(db, 'batchChannelConfig', configId), payload, { merge: true });
+        if (fileInput) fileInput.value = '';
+        if (triggerRun) {
+            showToast(t('build_channel.status_run_now_queued'));
+        } else if (enable) {
+            showToast(t('build_channel.status_schedule_on', { hour: getBatchCronHour() }));
+        } else {
+            showToast(t('build_channel.status_schedule_off'));
+        }
+        return true;
+    } catch (e) {
+        console.error('[BatchChannel] save:', e);
+        showToast(t('common.error_system', { msg: e.message || e.code || 'save' }));
+        return false;
+    }
+}
+
+window.handleBatchChannelMainAction = async () => {
+    const cfg = _batchChannelCfg;
+    if (batchChannelRunNowPending(cfg)) return;
+
+    const daily = isBatchDailyChecked();
+    if (daily && cfg?.enabled) {
+        await persistBatchChannelConfig({ enable: false });
+        return;
+    }
+    if (daily) {
+        await persistBatchChannelConfig({ enable: true });
+        return;
+    }
+    await persistBatchChannelConfig({ enable: false, triggerRun: true });
+};
+
+window.saveBatchChannelConfig = async (enable) => {
+    await persistBatchChannelConfig({ enable: !!enable });
+};
+
 function renderBatchChannelStatus(cfg) {
+    _batchChannelCfg = cfg;
     const el = document.getElementById('batch-channel-status');
-    const chip = document.getElementById('batch-channel-status-chip');
     let html = '';
-    let chipClass = 'batch-status-chip batch-status-chip--off';
-    let chipText = t('build_channel.status_off_short');
 
     if (!cfg) {
-        html = t('build_channel.status_off');
+        html = t('build_channel.status_idle');
     } else if (batchChannelRunNowPending(cfg)) {
         html = t('build_channel.status_run_now_pending');
-        chipClass = 'batch-status-chip batch-status-chip--running';
-        chipText = t('build_channel.status_running_short');
     } else if (cfg.enabled) {
-        const hour = cfg.cronHour != null ? Number(cfg.cronHour) : 3;
-        html = t('build_channel.status_on', { hour: Number.isFinite(hour) ? hour : 3 });
+        const hour = cfg.cronHour != null ? Number(cfg.cronHour) : BATCH_CHANNEL_CRON_HOUR_DEFAULT;
+        html = t('build_channel.status_on', { hour: Number.isFinite(hour) ? hour : BATCH_CHANNEL_CRON_HOUR_DEFAULT });
         if (cfg.lastRunMessage) html += ` — ${escapeHTML(cfg.lastRunMessage)}`;
-        chipClass = 'batch-status-chip batch-status-chip--on';
-        chipText = t('build_channel.status_on_short', { hour: Number.isFinite(hour) ? hour : 3 });
     } else {
-        html = t('build_channel.status_off');
+        html = t('build_channel.status_idle');
         if (cfg.lastRunMessage) html += ` — ${escapeHTML(cfg.lastRunMessage)}`;
     }
 
     if (el) el.textContent = html;
-    if (chip) {
-        chip.className = chipClass;
-        chip.textContent = chipText;
-    }
+    syncBatchDailyCheckboxFromCfg(cfg);
+    syncBatchDailyScheduleUI(cfg);
 }
 
 async function loadBatchChannelPage() {
-    if (!window.__isAdmin || !currentUser) return;
+    if (!currentUser) return;
+    const configId = getBatchChannelConfigId();
+    if (!configId) return;
     const { db, doc, collection, query, orderBy, limit, onSnapshot, where } = window.firebase;
 
     if (!window.__batchSourceModeBound) {
@@ -6662,10 +6856,17 @@ async function loadBatchChannelPage() {
                 templateZone?.classList.add('has-preview');
             }
         });
+        document.getElementById('batch-daily-checkbox')?.addEventListener('change', () => {
+            syncBatchDailyScheduleUI(_batchChannelCfg);
+        });
+        document.getElementById('batch-cron-hour')?.addEventListener('change', () => {
+            updateBatchChannelMainButton(_batchChannelCfg);
+            persistBatchChannelCronHourOnly();
+        });
     }
 
     fbUnsub('batchChannelConfig');
-    fbSub('batchChannelConfig', onSnapshot(doc(db, 'batchChannelConfig', BATCH_CHANNEL_CONFIG_ID), (snap) => {
+    fbSub('batchChannelConfig', onSnapshot(doc(db, 'batchChannelConfig', configId), (snap) => {
         const cfg = snap.exists() ? snap.data() : null;
         renderBatchChannelStatus(cfg);
         const urlInput = document.getElementById('batch-channel-url');
@@ -6673,8 +6874,10 @@ async function loadBatchChannelPage() {
             urlInput.value = cfg.channelUrl;
         }
         const cronInput = document.getElementById('batch-cron-hour');
-        if (cronInput && cfg?.cronHour != null) {
-            cronInput.value = String(cfg.cronHour);
+        if (cronInput) {
+            cronInput.value = String(
+                cfg?.cronHour != null ? cfg.cronHour : BATCH_CHANNEL_CRON_HOUR_DEFAULT
+            );
         }
         const yesterdayInput = document.getElementById('batch-yesterday-count');
         if (yesterdayInput && cfg?.yesterdayVideoCount != null) {
@@ -6692,188 +6895,56 @@ async function loadBatchChannelPage() {
     }, (err) => console.error('[BatchChannel] config listener:', err)));
 
     fbUnsub('batchChannelOrdersPick');
-    const pickQ = query(collection(db, 'orders'), orderBy('createdAt', 'desc'), limit(80));
+    fbUnsub('batchChannelOrdersPickFallback');
+    fbUnsub('batchChannelOrdersGallery');
+    fbUnsub('batchChannelOrdersGalleryFallback');
+    const pickQ = query(
+        collection(db, 'orders'),
+        where('userId', '==', currentUser.uid),
+        orderBy('createdAt', 'desc'),
+        limit(80)
+    );
     fbSub('batchChannelOrdersPick', onSnapshot(pickQ, (snap) => {
         _batchChannelPickerOrders = snap.docs
             .map((d) => ({ id: d.id, ...d.data() }))
             .filter((o) => (o.characterImageLink || '').trim() && (o.referenceVideoLink || '').trim());
         renderBatchChannelOrderPicker(_batchChannelPickerOrders, getBatchSelectedOrderIds());
-    }, (err) => console.error('[BatchChannel] orders pick:', err)));
+    }, (err) => {
+        console.error('[BatchChannel] orders pick:', err);
+        if (err?.code === 'failed-precondition') {
+            const fallbackQ = query(collection(db, 'orders'), orderBy('createdAt', 'desc'), limit(120));
+            fbSub('batchChannelOrdersPickFallback', onSnapshot(fallbackQ, (snap) => {
+                _batchChannelPickerOrders = snap.docs
+                    .map((d) => ({ id: d.id, ...d.data() }))
+                    .filter((o) => o.userId === currentUser.uid)
+                    .filter((o) => (o.characterImageLink || '').trim() && (o.referenceVideoLink || '').trim());
+                renderBatchChannelOrderPicker(_batchChannelPickerOrders, getBatchSelectedOrderIds());
+            }));
+        }
+    }));
 
-    fbUnsub('batchChannelOrdersGallery');
-    const galleryQ = query(collection(db, 'orders'), orderBy('createdAt', 'desc'), limit(100));
+    const galleryQ = query(
+        collection(db, 'orders'),
+        where('userId', '==', currentUser.uid),
+        orderBy('createdAt', 'desc'),
+        limit(100)
+    );
     fbSub('batchChannelOrdersGallery', onSnapshot(galleryQ, (snap) => {
         const rows = snap.docs
             .map((d) => ({ id: d.id, ...d.data() }))
             .filter((o) => o.isBatchChannel && (o.characterImageLink || o.resultLink));
         renderBatchChannelVideosGrid(rows);
-    }, (err) => console.error('[BatchChannel] videos grid:', err)));
-}
-
-window.saveBatchChannelConfig = async (enable) => {
-    if (!window.__isAdmin || !currentUser) {
-        return showToast(t('build_channel.status_admin_only'));
-    }
-    const { db, doc, getDoc, setDoc, serverTimestamp } = window.firebase;
-    const channelUrl = document.getElementById('batch-channel-url')?.value?.trim() || '';
-    const username = parseTikTokUsername(channelUrl);
-    if (enable && getBatchSourceModeFromUI() === 'tiktok' && !username) {
-        return showToast(t('build_channel.status_need_channel'));
-    }
-
-    let templateImageUrl = '';
-    let existingStartedAt = null;
-    try {
-        const existing = await getDoc(doc(db, 'batchChannelConfig', BATCH_CHANNEL_CONFIG_ID));
-        if (existing.exists()) {
-            const d = existing.data();
-            templateImageUrl = d.templateImageUrl || '';
-            existingStartedAt = d.startedAt || null;
+    }, (err) => {
+        console.error('[BatchChannel] videos grid:', err);
+        if (err?.code === 'failed-precondition') {
+            const fallbackQ = query(collection(db, 'orders'), orderBy('createdAt', 'desc'), limit(150));
+            fbSub('batchChannelOrdersGalleryFallback', onSnapshot(fallbackQ, (snap) => {
+                const rows = snap.docs
+                    .map((d) => ({ id: d.id, ...d.data() }))
+                    .filter((o) => o.userId === currentUser.uid)
+                    .filter((o) => o.isBatchChannel && (o.characterImageLink || o.resultLink));
+                renderBatchChannelVideosGrid(rows);
+            }));
         }
-    } catch (_) { /* ignore */ }
-
-    const fileInput = document.getElementById('batch-template-input');
-    const file = fileInput?.files?.[0];
-    if (enable && file) {
-        try {
-            templateImageUrl = await uploadFile(file, 'characters');
-            const preview = document.getElementById('batch-template-preview');
-            if (preview) {
-                preview.innerHTML = `<img src="${escapeHTML(templateImageUrl)}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:12px;">`;
-                document.getElementById('batch-template-zone')?.classList.add('has-preview');
-            }
-        } catch (e) {
-            console.error('[BatchChannel] upload template:', e);
-            return showToast(e.message || t('upload.error_network'));
-        }
-    }
-    if (enable && !templateImageUrl) {
-        return showToast(t('build_channel.status_need_template'));
-    }
-
-    const cronHourRaw = parseInt(document.getElementById('batch-cron-hour')?.value, 10);
-    const cronHour = Number.isFinite(cronHourRaw) ? Math.max(0, Math.min(23, cronHourRaw)) : 3;
-    const sourceMode = getBatchSourceModeFromUI();
-    const selectedOrderIds = getBatchSelectedOrderIds();
-    const yesterdayVideoCount = getBatchYesterdayVideoCount();
-
-    const payload = {
-        enabled: !!enable,
-        channelUrl: channelUrl,
-        channelUsername: username,
-        templateImageUrl: templateImageUrl,
-        sourceMode,
-        cronHour,
-        yesterdayVideoCount,
-        wardrobeReplace: 'full',
-        frameSec: 2.5,
-        selectedOrderIds,
-        createdBy: currentUser.uid,
-        createdByEmail: currentUser.email || '',
-        createdByName: currentUser.displayName || userDisplayLabel(currentUser),
-        updatedAt: serverTimestamp()
-    };
-    if (enable && !existingStartedAt) {
-        payload.startedAt = serverTimestamp();
-    }
-
-    try {
-        await setDoc(doc(db, 'batchChannelConfig', BATCH_CHANNEL_CONFIG_ID), payload, { merge: true });
-        renderBatchChannelStatus({ ...payload, enabled: !!enable });
-        showToast(t('build_channel.status_saved'));
-        if (fileInput) fileInput.value = '';
-    } catch (e) {
-        console.error('[BatchChannel] save:', e);
-        showToast(t('common.error_system', { msg: e.message || e.code || 'save' }));
-    }
-};
-
-async function _prepareBatchChannelTriggerPayload() {
-    const { db, doc, getDoc } = window.firebase;
-    const channelUrl = document.getElementById('batch-channel-url')?.value?.trim() || '';
-    const username = parseTikTokUsername(channelUrl);
-    const sourceMode = getBatchSourceModeFromUI();
-    const selectedOrderIds = getBatchSelectedOrderIds();
-    if (sourceMode === 'tiktok' && !username) {
-        showToast(t('build_channel.status_need_channel'));
-        return null;
-    }
-    if (sourceMode === 'orders' && !selectedOrderIds.length) {
-        showToast(t('build_channel.status_need_orders'));
-        return null;
-    }
-
-    let templateImageUrl = '';
-    const existing = await getDoc(doc(db, 'batchChannelConfig', BATCH_CHANNEL_CONFIG_ID));
-    if (existing.exists()) {
-        templateImageUrl = existing.data().templateImageUrl || '';
-    }
-
-    const fileInput = document.getElementById('batch-template-input');
-    const file = fileInput?.files?.[0];
-    if (file) {
-        templateImageUrl = await uploadFile(file, 'characters');
-        const preview = document.getElementById('batch-template-preview');
-        if (preview) {
-            preview.innerHTML = `<img src="${escapeHTML(templateImageUrl)}" alt="" style="width:100%; border-radius:8px;">`;
-        }
-        if (fileInput) fileInput.value = '';
-    }
-    if (!templateImageUrl) {
-        showToast(t('build_channel.status_need_template'));
-        return null;
-    }
-
-    const cronHourRaw = parseInt(document.getElementById('batch-cron-hour')?.value, 10);
-    const cronHour = Number.isFinite(cronHourRaw) ? Math.max(0, Math.min(23, cronHourRaw)) : 3;
-    const yesterdayVideoCount = getBatchYesterdayVideoCount();
-
-    return {
-        channelUrl,
-        channelUsername: username,
-        templateImageUrl,
-        sourceMode,
-        cronHour,
-        yesterdayVideoCount,
-        wardrobeReplace: 'full',
-        frameSec: 2.5,
-        selectedOrderIds,
-        createdBy: currentUser.uid,
-        createdByEmail: currentUser.email || '',
-        createdByName: currentUser.displayName || userDisplayLabel(currentUser),
-    };
+    }));
 }
-
-async function _queueBatchChannelRun(runNowMode) {
-    if (!window.__isAdmin || !currentUser) {
-        return showToast(t('build_channel.status_admin_only'));
-    }
-    const btnIds = ['batch-channel-run-now-btn', 'batch-channel-run-full-btn'];
-    btnIds.forEach((id) => { const b = document.getElementById(id); if (b) b.disabled = true; });
-    const { db, doc, setDoc, serverTimestamp } = window.firebase;
-    try {
-        const base = await _prepareBatchChannelTriggerPayload();
-        if (!base) return;
-        await setDoc(doc(db, 'batchChannelConfig', BATCH_CHANNEL_CONFIG_ID), {
-            ...base,
-            runNowMode,
-            runNowRequestedAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
-        }, { merge: true });
-        renderBatchChannelStatus({ runNowRequestedAt: { toMillis: () => Date.now() + 1 } });
-        showToast(t('build_channel.status_run_now_queued'));
-    } catch (e) {
-        console.error('[BatchChannel] queue run:', e);
-        showToast(t('common.error_system', { msg: e.message || e.code || 'run' }));
-    } finally {
-        btnIds.forEach((id) => { const b = document.getElementById(id); if (b) b.disabled = false; });
-    }
-}
-
-window.triggerBatchChannelRunNow = () => _queueBatchChannelRun('test');
-
-window.triggerBatchChannelRunFull = () => {
-    const mode = getBatchSourceModeFromUI() === 'orders' ? 'orders' : 'full';
-    return _queueBatchChannelRun(mode);
-};
-
