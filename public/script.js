@@ -175,7 +175,6 @@ function updateModelSelectionUI() {
     if (qCost) qCost.textContent = String(MODELS.quality.cost);
     if (q30Cost) q30Cost.textContent = String(MODELS.quality30.cost);
     if (fCost) fCost.textContent = String(MODELS.fast.cost);
-    updateFirstOrderUI();
 }
 
 function localizedModel(key) {
@@ -756,15 +755,14 @@ export async function initAppLogic() {
 
     // Global Error Handler for debugging
     window.onerror = function (msg, url, lineNo, columnNo, error) {
-        const message = [
-            'Message: ' + msg,
-            'Line: ' + lineNo,
-            'Column: ' + columnNo,
-            'Error object: ' + JSON.stringify(error)
-        ].join(' - ');
-        console.error("Global Error:", message);
-        showToast(t('common.error_system', { msg }));
-        return false;
+        const errText = error?.message || error?.stack || String(msg || 'unknown');
+        console.error('Global Error:', msg, url, lineNo, columnNo, error);
+        try {
+            showToast(t('common.error_system', { msg: String(msg || errText).slice(0, 200) }));
+        } catch (e) {
+            console.error('Global Error handler failed:', e);
+        }
+        return true;
     };
 
     // Capture ?ref=XXX before auth state initialises so it survives signup
@@ -2442,7 +2440,8 @@ function updateFirstOrderUI() {
     if (modelGroupEl) modelGroupEl.style.display = promo.canUsePromo ? 'none' : 'block';
 
     if (promo.canUsePromo) {
-        selectDefaultModel(DAILY_PROMO_MODEL_KEY);
+        const promoRadio = document.querySelector(`input[name="model-type"][value="${DAILY_PROMO_MODEL_KEY}"]`);
+        if (promoRadio) promoRadio.checked = true;
     }
 
     if (costEl) {
