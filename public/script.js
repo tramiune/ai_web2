@@ -819,7 +819,7 @@ export async function initAppLogic() {
 
             currentUser = null;
             hideAuthLoading();
-            handleUserLoggedOut(false);
+            handleUserLoggedOut(true);
         } catch (e) {
             console.error("Auth Change Error:", e);
             hideAuthLoading();
