@@ -100,6 +100,7 @@ from user_order_notes import (
     USER_NOTE_FILES_INVALID,
     USER_NOTE_FILES_MISSING,
     USER_NOTE_ORDER_FAILED,
+    is_invalid_order_media_error,
     user_note_from_vae_error,
 )
 _active_render_provider = RENDER_PROVIDER_XIAOYANG
@@ -982,7 +983,20 @@ def _pending_order_worker():
                 submit_order(order_id)
             except Exception as e:
                 print(f"❌ Lỗi nạp đơn {order_id}: {e}")
-                _session_error_backoff[order_id] = time.time() + SESSION_ERROR_BACKOFF_SEC
+                if is_invalid_order_media_error(e):
+                    doc = db.collection("orders").document(order_id).get()
+                    if doc.exists:
+                        data = doc.to_dict() or {}
+                        if data.get("status") == "pending":
+                            _fail_order_processing(
+                                doc,
+                                data,
+                                str(e),
+                                USER_NOTE_FILES_MISSING,
+                                "invalid media",
+                            )
+                else:
+                    _session_error_backoff[order_id] = time.time() + SESSION_ERROR_BACKOFF_SEC
         else:
             time.sleep(0.5)
 
@@ -2038,11 +2052,23 @@ def submit_to_videoaieasy(order_id, account):
                 success = True
             except (requests.RequestException, VideoAiEasyAuthError, VideoAiEasyError) as e:
                 print(f"❌ Nạp VideoAiEasy thất bại {order_id} ({nick_label}): {e}")
-                if isinstance(e, VideoAiEasyAuthError):
+                if is_invalid_order_media_error(e):
+                    _fail_order_processing(
+                        doc,
+                        data,
+                        str(e),
+                        USER_NOTE_FILES_MISSING,
+                        "invalid media",
+                    )
+                elif isinstance(e, VideoAiEasyAuthError):
                     _reset_vae_web_client(account_id)
-                notify_internal_error_telegram(
-                    order_id, data, str(e), f"submit videoaieasy/{nick_label}"
-                )
+                    notify_internal_error_telegram(
+                        order_id, data, str(e), f"submit videoaieasy/{nick_label}"
+                    )
+                else:
+                    notify_internal_error_telegram(
+                        order_id, data, str(e), f"submit videoaieasy/{nick_label}"
+                    )
                 success = False
             finally:
                 if vae_char_tmp and vae_char_path and os.path.exists(vae_char_path):

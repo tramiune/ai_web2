@@ -28,6 +28,24 @@ USER_NOTE_ORDER_FAILED = USER_NOTE_TECHNICAL
 
 USER_NOTE_VAE_FALLBACK = USER_NOTE_TECHNICAL
 
+_INVALID_MEDIA_MARKERS = (
+    "cannot identify image",
+    "unidentifiedimageerror",
+    "broken data",
+    "truncated",
+    "file rỗng",
+    "0 byte",
+    "không đọc được",
+    "không tải được ảnh/video",
+    "heic",
+    "ftypheic",
+)
+
+
+def is_invalid_order_media_error(err: object) -> bool:
+    s = str(err or "").lower()
+    return any(m in s for m in _INVALID_MEDIA_MARKERS)
+
 
 def user_note_from_vae_error(err: str | None) -> str:
     """Hiển thị đúng thông báo VAE trả về (error_message / API error)."""
