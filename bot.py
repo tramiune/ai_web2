@@ -100,7 +100,7 @@ from user_order_notes import (
     USER_NOTE_FILES_INVALID,
     USER_NOTE_FILES_MISSING,
     USER_NOTE_ORDER_FAILED,
-    user_note_for_videoaieasy_failure,
+    user_note_from_vae_error,
 )
 _active_render_provider = RENDER_PROVIDER_XIAOYANG
 _active_render_provider_lock = threading.Lock()
@@ -820,7 +820,7 @@ def _http_poll_videoaieasy_orders(orders_to_check):
                 doc,
                 order_data,
                 f"VideoAiEasy job {job_id} {status}: {err or ''}",
-                user_note_for_videoaieasy_failure(err),
+                user_note_from_vae_error(err),
                 "render videoaieasy",
             )
         else:

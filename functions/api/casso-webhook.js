@@ -5,7 +5,7 @@
  * Provide JSON via env vars: FIREBASE_SERVICE_ACCOUNT (preferred) or SERVICE_ACCOUNT.
  */
 
-const TELEGRAM_BOT_TOKEN = '8855918099:AAHmPUWTe6_dicXyh0nseADQomVv6MGKjGQ';
+const TELEGRAM_BOT_TOKEN = '8647185235:AAEcxfblgna8BnQoAX2B7cF9HEyx3EhDBts';
 const TELEGRAM_CHAT_ID = '6067707939';
 
 function getServiceAccountFromEnv(env, key) {
@@ -77,6 +77,11 @@ export async function onRequestPost(context) {
            await grantCoins(state.token, state.cfg.project_id, topup.userId, coins, topup.id);
            console.log(`Successfully granted ${coins} coins to user ${topup.userId}`);
            
+           const todayTotalVnd = await trackDailyRevenueVnd(env, amount, topup.id, 'ALL');
+           const todayLine = todayTotalVnd != null
+             ? `\n📊 Tổng hôm nay: ${todayTotalVnd.toLocaleString('vi-VN')}đ`
+             : '';
+
            // Gửi thông báo Telegram
            const tidDisplay = transaction.tid || transaction.id || 'N/A';
            const identityLine = topup.userEmail
@@ -88,7 +93,8 @@ export async function onRequestPost(context) {
                            `💵 Số tiền: ${amount.toLocaleString()}đ\n` +
                            `🪙 Coin nhận: +${coins}\n` +
                            `📝 Nội dung CK: \`${code}\`\n` +
-                           `🔑 Mã GD: \`${tidDisplay}\``;
+                           `🔑 Mã GD: \`${tidDisplay}\`` +
+                           todayLine;
            await notifyTelegram(message);
 
            // Affiliate / Referral commission - isolated, must never block topup flow
@@ -237,6 +243,40 @@ async function grantCoins(token, projectId, userId, coins, topupId) {
 }
 
 function b64(str) { return btoa(str).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""); }
+
+const REVENUE_KV_TTL_SEC = 14 * 24 * 60 * 60;
+const REVENUE_DEDUPE_TTL_SEC = 48 * 60 * 60;
+
+function vietnamDateKey(date = new Date()) {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Ho_Chi_Minh' }).format(date);
+}
+
+async function trackDailyRevenueVnd(env, amountVnd, topupId, scope = 'ALL') {
+  const kv = env?.REVENUE_KV;
+  if (!kv || !topupId) return null;
+  const amount = Math.round(Number(amountVnd) || 0);
+  if (amount <= 0) return null;
+
+  try {
+    const dedupeKey = `rev:dedupe:${String(topupId)}`;
+    const dayKey = vietnamDateKey();
+    const totalKey = `rev:total:${scope}:${dayKey}`;
+
+    if (await kv.get(dedupeKey)) {
+      const existing = await kv.get(totalKey);
+      return existing ? parseInt(existing, 10) : 0;
+    }
+
+    const prev = parseInt(await kv.get(totalKey) || '0', 10);
+    const next = prev + amount;
+    await kv.put(totalKey, String(next), { expirationTtl: REVENUE_KV_TTL_SEC });
+    await kv.put(dedupeKey, '1', { expirationTtl: REVENUE_DEDUPE_TTL_SEC });
+    return next;
+  } catch (err) {
+    console.warn('[RevenueKV] trackDailyRevenueVnd:', err.message);
+    return null;
+  }
+}
 
 async function notifyTelegram(text) {
   const url = `https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage`;

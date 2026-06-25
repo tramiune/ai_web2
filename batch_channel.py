@@ -91,11 +91,36 @@ def parse_tiktok_username(raw: str) -> str:
         raise ValueError("empty_channel")
     if s.startswith("@"):
         return s[1:].split("/")[0].strip()
-    if "tiktok.com" in s:
-        m = re.search(r"tiktok\.com/@([^/?#]+)", s, re.I)
-        if m:
-            return m.group(1).strip()
+    m = re.search(r"tiktok\.com/@([^/?#]+)", s, re.I)
+    if m:
+        return m.group(1).strip()
+    if re.match(r"^https?://", s, re.I):
+        raise ValueError("invalid_channel_url_need_profile_link")
     return s.split("/")[0].strip().lstrip("@")
+
+
+def batch_error_user_message(err: Exception | str) -> str:
+    """Thông báo ngắn gọn cho user (lưu lastRunMessage + hiện trên web)."""
+    s = str(err).strip()
+    if not s:
+        return "Không tạo được video — vui lòng thử lại."
+    low = s.lower()
+    if "invalid_channel_url_need_profile_link" in low or "empty_channel" in low:
+        return (
+            "Link kênh không hợp lệ. Dùng link trang cá nhân dạng "
+            "https://www.tiktok.com/@tenkenh — không dùng link video ngắn (vt/vm.tiktok.com)."
+        )
+    if "unique_id is invalid" in low or "unique_id" in low and "invalid" in low:
+        return (
+            "Không nhận diện được kênh TikTok. Hãy dán link trang cá nhân "
+            "https://www.tiktok.com/@tenkenh (mở kênh trên app → Chia sẻ → Sao chép liên kết trang)."
+        )
+    if low.startswith("tikwm:") or "tikwm" in low:
+        return (
+            "Không lấy được video từ kênh — kiểm tra link kênh "
+            "(phải là trang @username, không phải link 1 video)."
+        )
+    return s
 
 
 def fetch_channel_videos(username: str, *, max_pages: int = 5) -> list[dict]:
@@ -581,7 +606,15 @@ def run_batch(
             print(f"⏭️ Đã chạy batch cho ngày {y_date} (config {config_id}).")
             return 0
 
-    username = parse_tiktok_username(channel) if channel else ""
+    if source_mode != "orders":
+        try:
+            username = parse_tiktok_username(channel) if channel else ""
+        except ValueError as e:
+            raise ValueError(batch_error_user_message(e)) from e
+        if not username or ":" in username:
+            raise ValueError(batch_error_user_message("invalid_channel_url_need_profile_link"))
+    else:
+        username = ""
     run_ref = db.collection(RUNS_COLLECTION).document()
     run_ref.set({
         "dateVN": y_date,
@@ -727,7 +760,7 @@ def run_batch(
         cfg_ref.update({
             "lastRunAt": firestore.SERVER_TIMESTAMP,
             "lastRunStatus": "failed",
-            "lastRunMessage": str(e),
+            "lastRunMessage": batch_error_user_message(e),
         })
         return 1
 

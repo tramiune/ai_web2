@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Poll Firestore runNowRequestedAt — admin bấm「Chạy thử ngay」trên web.
-# Crontab: * * * * * /home/hoang1432001/ai_web2/scripts/batch-channel-trigger.sh >> /home/hoang1432001/ai_web2/logs/batch-channel-trigger.log 2>&1
+# Crontab: * * * * * /root/ai_web2/scripts/batch-channel-trigger.sh >> /root/ai_web2/logs/batch-channel-trigger.log 2>&1
 
 set -euo pipefail
 cd "$(dirname "$0")/.."

@@ -26,6 +26,21 @@ USER_NOTE_CLIENT_OUTDATED = (
 )
 USER_NOTE_ORDER_FAILED = USER_NOTE_TECHNICAL
 
+USER_NOTE_VAE_FALLBACK = USER_NOTE_TECHNICAL
+
+
+def user_note_from_vae_error(err: str | None) -> str:
+    """Hiển thị đúng thông báo VAE trả về (error_message / API error)."""
+    msg = " ".join(str(err or "").split())
+    if msg.startswith("HTTP ") and ": " in msg:
+        tail = msg.split(": ", 1)[1].strip()
+        if tail and not tail.startswith("{"):
+            msg = tail
+    if not msg:
+        return USER_NOTE_VAE_FALLBACK
+    return msg[:500]
+
+
 _MODERATION_MARKERS = (
     "nhạy cảm", "kiểm duyệt", "moderation", "policy", "censored", "vi phạm",
     "nsfw", "sensitive", "blocked", "content", "unsafe", "rejected",
@@ -33,11 +48,6 @@ _MODERATION_MARKERS = (
 _TECHNICAL_MARKERS = (
     "sự cố kỹ thuật", "technical", "upstream", "timeout", "overloaded",
     "maintenance", "bảo trì", "expired", "e_upstream", "no result", "503", "502",
-)
-_VAE_TECHNICAL_MARKERS = _TECHNICAL_MARKERS + (
-    "kỹ thuật", "quá tải", "overload", "busy", "timed out", "hết thời gian",
-    "500", "504", "429", "unavailable", "rate limit", "thử lại sau",
-    "server error", "http 5",
 )
 
 
@@ -51,12 +61,7 @@ def user_note_for_render_failure(err: str | None) -> str:
 
 
 def user_note_for_videoaieasy_failure(err: str | None) -> str:
-    low = (err or "").lower()
-    if any(m in low for m in _MODERATION_MARKERS):
-        return USER_NOTE_MODERATION
-    if any(m in low for m in _VAE_TECHNICAL_MARKERS):
-        return USER_NOTE_VAE_OVERLOAD
-    return USER_NOTE_VAE_OVERLOAD
+    return user_note_from_vae_error(err)
 
 
 def user_note_for_media_validation(err: str | None) -> str:

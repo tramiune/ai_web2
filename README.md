@@ -10,8 +10,8 @@ Chạy trên **GCP VPS** với Chrome headless (xvfb) + bot **API mode** (không
 
 | Mục | Giá trị |
 |-----|---------|
-| VPS | `hoang1432001@136.119.193.255` |
-| Repo trên VPS | `~/ai_web2` |
+| VPS | `root@165.101.46.68` (cùng máy Motion + Kaling) |
+| Repo trên VPS | `/root/ai_web2` |
 | Bot name | `nhaycloud_vps_bot` |
 | Chrome CDP port | **9223** |
 | Chrome profile | `~/.chrome-aidancing-wallpaper` / **Profile 14** (Lan Trần) |
@@ -25,7 +25,7 @@ Chạy trên **GCP VPS** với Chrome headless (xvfb) + bot **API mode** (không
 ### 1.1 Trên VPS — cài dependency
 
 ```bash
-ssh hoang1432001@136.119.193.255
+ssh root@165.101.46.68
 
 sudo apt-get update
 sudo apt-get install -y python3-pip xvfb google-chrome-stable tmux
@@ -41,7 +41,7 @@ python3 -m playwright install-deps
 
 ```bash
 # Trên Mac
-scp ~/Documents/Tramiune/ai_web2/serviceAccountKey.json hoang1432001@136.119.193.255:~/ai_web2/
+scp ~/Documents/Tramiune/ai_web2/serviceAccountKey.json root@165.101.46.68:~/ai_web2/
 ```
 
 ### 1.3 Copy Chrome profile từ Mac (Google Auth)
@@ -57,7 +57,7 @@ cp "$HOME/Library/Application Support/Google/Chrome/Local State" ~/.chrome-aidan
 cp -R "$HOME/Library/Application Support/Google/Chrome/Profile 14" ~/.chrome-aidancing-wallpaper/
 
 tar czf ~/chrome-wallpaper.tar.gz -C ~/.chrome-aidancing-wallpaper .
-scp ~/chrome-wallpaper.tar.gz hoang1432001@136.119.193.255:~/
+scp ~/chrome-wallpaper.tar.gz root@165.101.46.68:~/
 ```
 
 **Trên VPS:**
@@ -81,7 +81,7 @@ rm -f ~/.chrome-aidancing-wallpaper/SingletonLock \
 SSH vào VPS:
 
 ```bash
-ssh hoang1432001@136.119.193.255
+ssh root@165.101.46.68
 ```
 
 ### Bước 1 — Bật Chrome (xvfb + CDP)
@@ -156,7 +156,7 @@ Copy profile Mac **không luôn đủ** trên Linux. Khi hết session, login tr
 ### Terminal Mac (giữ mở)
 
 ```bash
-ssh -L 9223:127.0.0.1:9223 hoang1432001@136.119.193.255
+ssh -L 9223:127.0.0.1:9223 root@165.101.46.68
 ```
 
 ### Mac Chrome
@@ -212,7 +212,7 @@ tmux send-keys -t bot 'cd ~/ai_web2 && export BOT_CDP_URL=http://127.0.0.1:9223 
 Hoặc copy nhanh 1 file:
 
 ```bash
-scp bot.py hoang1432001@136.119.193.255:~/ai_web2/
+scp bot.py root@165.101.46.68:~/ai_web2/
 ```
 
 ---

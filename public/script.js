@@ -792,7 +792,7 @@ export async function initAppLogic() {
                     }
                 }
                 currentUser = null;
-                handleUserLoggedOut(false);
+                handleUserLoggedOut();
                 return;
             }
 
@@ -850,14 +850,16 @@ export async function initAppLogic() {
 }
 
 const TELEGRAM_SUPPORT_URL = 'https://t.me/motionaistudio';
+const ZALO_SUPPORT_URL = 'https://zalo.me/0965951536';
 const LOGO_ADMIN_TAPS_REQUIRED = 5;
 const LOGO_ADMIN_TAP_WINDOW_MS = 2500;
 const LOGO_SINGLE_NAV_DELAY_MS = 450;
 
 function setupTelegramFab() {
     const fab = document.getElementById('telegram-fab');
-    if (!fab) return;
-    fab.href = TELEGRAM_SUPPORT_URL;
+    if (fab) fab.href = TELEGRAM_SUPPORT_URL;
+    const zaloFab = document.getElementById('zalo-fab');
+    if (zaloFab) zaloFab.href = ZALO_SUPPORT_URL;
 }
 
 function setupLogoAdminUnlock() {
@@ -913,7 +915,7 @@ function setupLogoAdminUnlock() {
 }
 
 function showAdminAuthModal() {
-    promptGoogleSignIn(false);
+    promptGoogleSignIn();
 }
 
 function requiresExternalBrowser() {
@@ -1378,6 +1380,7 @@ async function login() {
 async function logout() {
     const { auth, signOut } = window.firebase;
     try {
+        delete window.__googleSignInAutoAttempted;
         await signOut(auth);
         showToast(t('common.toast_logout_success'));
     } catch (error) {
@@ -1733,6 +1736,9 @@ function handleUserLoggedOut(autoGoogleSignIn = false) {
     adminSubscribedOrderStatus = null;
     adminSubscribedTopupStatus = null;
     Object.keys(FB_CACHE).forEach(k => { delete FB_CACHE[k]; });
+    _batchChannelPickerOrders = [];
+    resetBatchChannelForm({ keepDefaults: true });
+    closeModal('batch-channel-modal');
 
     // Legacy var (giờ đã unsub trong fbUnsubAll, để null cho an toàn)
     referralEarningsUnsubscribe = null;
@@ -1762,13 +1768,7 @@ function showBuildChannel() {
 }
 
 function updateBatchChannelNewBadge() {
-    const btn = document.getElementById('home-auto-video-btn');
-    if (!btn) return;
-    let seen = false;
-    try {
-        seen = localStorage.getItem(BATCH_CHANNEL_NEW_KEY) === '1';
-    } catch (_) { /* ignore */ }
-    btn.classList.toggle('has-new-badge', !seen);
+    /* Badge MỚI luôn hiển thị — CSS .auto-video-new-badge */
 }
 
 window.openBatchChannelModal = () => {
@@ -1777,10 +1777,6 @@ window.openBatchChannelModal = () => {
         return;
     }
     if (blockIfUpgradeMaintenance()) return;
-    try {
-        localStorage.setItem(BATCH_CHANNEL_NEW_KEY, '1');
-    } catch (_) { /* ignore */ }
-    updateBatchChannelNewBadge();
     loadBatchChannelPage();
     window.openModal('batch-channel-modal');
 };
@@ -3540,7 +3536,7 @@ async function setupEventListeners() {
             }
 
             if (!currentUser) {
-                promptGoogleSignIn(false);
+                promptGoogleSignIn();
                 showToast(t('common.toast_login_required'));
                 return;
             }
@@ -6544,7 +6540,6 @@ async function payReferralCommissionClient(topupId, referredUserId, baseCoins, g
 window.payReferralCommissionClient = payReferralCommissionClient;
 
 // --- Batch channel (modal on home) ---
-const BATCH_CHANNEL_NEW_KEY = 'nhay_batch_auto_video_seen_v1';
 const BATCH_CHANNEL_CRON_HOUR_DEFAULT = 3;
 let _batchChannelPickerOrders = [];
 let _batchChannelCfg = null;
@@ -6553,14 +6548,114 @@ function getBatchChannelConfigId() {
     return currentUser?.uid || '';
 }
 
+function resetBatchChannelForm({ keepDefaults = true } = {}) {
+    const urlInput = document.getElementById('batch-channel-url');
+    if (urlInput) urlInput.value = '';
+
+    const templateInput = document.getElementById('batch-template-input');
+    if (templateInput) templateInput.value = '';
+
+    const preview = document.getElementById('batch-template-preview');
+    const templateZone = document.getElementById('batch-template-zone');
+    if (preview) preview.innerHTML = '';
+    templateZone?.classList.remove('has-preview');
+
+    const cronInput = document.getElementById('batch-cron-hour');
+    if (cronInput) cronInput.value = String(BATCH_CHANNEL_CRON_HOUR_DEFAULT);
+
+    const yesterdayInput = document.getElementById('batch-yesterday-count');
+    if (yesterdayInput) yesterdayInput.value = '0';
+
+    const box = document.getElementById('batch-daily-checkbox');
+    if (box) box.checked = !!keepDefaults;
+
+    syncBatchSourceModeUI('tiktok');
+    renderBatchChannelOrderPicker(_batchChannelPickerOrders, []);
+    _batchChannelCfg = null;
+    renderBatchChannelStatus(null);
+}
+
+function applyBatchChannelConfigToForm(cfg) {
+    const wasPending = _batchChannelWasPending;
+    const pending = batchChannelRunNowPending(cfg);
+    _batchChannelWasPending = pending;
+
+    if (wasPending && !pending) {
+        if (cfg?.lastRunStatus === 'failed') {
+            const msg = batchChannelExplainRunMessage(cfg);
+            showToast(t('build_channel.status_run_failed', { msg }));
+        }
+    }
+
+    renderBatchChannelStatus(cfg);
+
+    const urlInput = document.getElementById('batch-channel-url');
+    if (urlInput) urlInput.value = cfg?.channelUrl || '';
+
+    const cronInput = document.getElementById('batch-cron-hour');
+    if (cronInput) {
+        cronInput.value = String(
+            cfg?.cronHour != null ? cfg.cronHour : BATCH_CHANNEL_CRON_HOUR_DEFAULT
+        );
+    }
+
+    const yesterdayInput = document.getElementById('batch-yesterday-count');
+    if (yesterdayInput) {
+        yesterdayInput.value = String(
+            cfg?.yesterdayVideoCount != null ? cfg.yesterdayVideoCount : 0
+        );
+    }
+
+    syncBatchSourceModeUI(cfg?.sourceMode || 'tiktok');
+
+    const preview = document.getElementById('batch-template-preview');
+    const templateZone = document.getElementById('batch-template-zone');
+    if (preview) {
+        if (cfg?.templateImageUrl) {
+            preview.innerHTML = `<img src="${escapeHTML(cfg.templateImageUrl)}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:12px;">`;
+            templateZone?.classList.add('has-preview');
+        } else {
+            preview.innerHTML = '';
+            templateZone?.classList.remove('has-preview');
+        }
+    }
+
+    renderBatchChannelOrderPicker(_batchChannelPickerOrders, cfg?.selectedOrderIds || []);
+}
+
 function parseTikTokUsername(raw) {
     const s = (raw || '').trim();
     if (!s) return '';
     if (s.startsWith('@')) return s.slice(1).split('/')[0];
     const m = s.match(/tiktok\.com\/@([^/?#]+)/i);
     if (m) return m[1];
+    if (/^https?:\/\//i.test(s)) return '';
     return s.replace(/^@/, '').split('/')[0];
 }
+
+function getBatchChannelUrlError(channelUrl) {
+    const s = (channelUrl || '').trim();
+    if (!s) return 'need_channel';
+    if (!parseTikTokUsername(s)) {
+        return /^https?:\/\//i.test(s) ? 'invalid_channel' : 'need_channel';
+    }
+    return null;
+}
+
+function batchChannelExplainRunMessage(cfg) {
+    const raw = (cfg?.lastRunMessage || '').trim();
+    if (!raw) return '';
+    const low = raw.toLowerCase();
+    if (low.includes('invalid_channel') || low.includes('unique_id is invalid') || low.includes('tikwm')) {
+        return t('build_channel.status_invalid_channel');
+    }
+    if (low.includes('link kênh không hợp lệ') || low.includes('không nhận diện được kênh')) {
+        return raw;
+    }
+    return raw;
+}
+
+let _batchChannelWasPending = false;
 
 function batchChannelRunNowPending(cfg) {
     if (!cfg?.runNowRequestedAt) return false;
@@ -6697,7 +6792,7 @@ function updateBatchChannelMainButton(cfg) {
 function syncBatchDailyCheckboxFromCfg(cfg) {
     const box = document.getElementById('batch-daily-checkbox');
     if (!box) return;
-    box.checked = !!cfg?.enabled;
+    box.checked = cfg != null ? !!cfg.enabled : true;
 }
 
 function batchChannelRunNowMode() {
@@ -6741,9 +6836,16 @@ async function persistBatchChannelConfig({ enable, triggerRun = false }) {
     const sourceMode = getBatchSourceModeFromUI();
     const selectedOrderIds = getBatchSelectedOrderIds();
 
-    if (sourceMode === 'tiktok' && !username) {
-        showToast(t('build_channel.status_need_channel'));
-        return false;
+    if (sourceMode === 'tiktok') {
+        const channelErr = getBatchChannelUrlError(channelUrl);
+        if (channelErr === 'invalid_channel') {
+            showToast(t('build_channel.status_invalid_channel'));
+            return false;
+        }
+        if (channelErr === 'need_channel' || !username) {
+            showToast(t('build_channel.status_need_channel'));
+            return false;
+        }
     }
     if (sourceMode === 'orders' && !selectedOrderIds.length) {
         showToast(t('build_channel.status_need_orders'));
@@ -6854,21 +6956,39 @@ function renderBatchChannelStatus(cfg) {
     _batchChannelCfg = cfg;
     const el = document.getElementById('batch-channel-status');
     let html = '';
+    let show = false;
+    let isError = false;
 
-    if (!cfg) {
-        html = t('build_channel.status_idle');
-    } else if (batchChannelRunNowPending(cfg)) {
+    const channelUrl = cfg?.channelUrl || document.getElementById('batch-channel-url')?.value || '';
+    const channelErr = getBatchChannelUrlError(channelUrl);
+
+    if (cfg && batchChannelRunNowPending(cfg)) {
         html = t('build_channel.status_run_now_pending');
-    } else if (cfg.enabled) {
+        show = true;
+    } else if (channelErr === 'invalid_channel') {
+        html = t('build_channel.status_invalid_channel');
+        show = true;
+        isError = true;
+    } else if (cfg?.lastRunStatus === 'failed' && cfg?.lastRunMessage) {
+        html = batchChannelExplainRunMessage(cfg);
+        show = true;
+        isError = true;
+    } else if (cfg?.enabled) {
         const hour = cfg.cronHour != null ? Number(cfg.cronHour) : BATCH_CHANNEL_CRON_HOUR_DEFAULT;
         html = t('build_channel.status_on', { hour: Number.isFinite(hour) ? hour : BATCH_CHANNEL_CRON_HOUR_DEFAULT });
         if (cfg.lastRunMessage) html += ` — ${escapeHTML(cfg.lastRunMessage)}`;
-    } else {
-        html = t('build_channel.status_idle');
-        if (cfg.lastRunMessage) html += ` — ${escapeHTML(cfg.lastRunMessage)}`;
+        show = true;
+    } else if (cfg?.lastRunMessage) {
+        html = escapeHTML(batchChannelExplainRunMessage(cfg) || cfg.lastRunMessage);
+        show = true;
+        if (cfg.lastRunStatus === 'failed') isError = true;
     }
 
-    if (el) el.textContent = html;
+    if (el) {
+        el.textContent = html;
+        el.style.display = show ? '' : 'none';
+        el.classList.toggle('batch-status-text--error', isError);
+    }
     syncBatchDailyCheckboxFromCfg(cfg);
     syncBatchDailyScheduleUI(cfg);
 }
@@ -6911,35 +7031,17 @@ async function loadBatchChannelPage() {
             updateBatchChannelMainButton(_batchChannelCfg);
             persistBatchChannelCronHourOnly();
         });
+        document.getElementById('batch-channel-url')?.addEventListener('input', () => {
+            renderBatchChannelStatus(_batchChannelCfg);
+        });
     }
 
     fbUnsub('batchChannelConfig');
+    resetBatchChannelForm({ keepDefaults: true });
     fbSub('batchChannelConfig', onSnapshot(doc(db, 'batchChannelConfig', configId), (snap) => {
+        if (currentUser?.uid !== configId) return;
         const cfg = snap.exists() ? snap.data() : null;
-        renderBatchChannelStatus(cfg);
-        const urlInput = document.getElementById('batch-channel-url');
-        if (urlInput && cfg?.channelUrl) {
-            urlInput.value = cfg.channelUrl;
-        }
-        const cronInput = document.getElementById('batch-cron-hour');
-        if (cronInput) {
-            cronInput.value = String(
-                cfg?.cronHour != null ? cfg.cronHour : BATCH_CHANNEL_CRON_HOUR_DEFAULT
-            );
-        }
-        const yesterdayInput = document.getElementById('batch-yesterday-count');
-        if (yesterdayInput && cfg?.yesterdayVideoCount != null) {
-            yesterdayInput.value = String(cfg.yesterdayVideoCount);
-        }
-        syncBatchSourceModeUI(cfg?.sourceMode || 'tiktok');
-        const preview = document.getElementById('batch-template-preview');
-        if (preview && cfg?.templateImageUrl) {
-            preview.innerHTML = `<img src="${escapeHTML(cfg.templateImageUrl)}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:12px;">`;
-            document.getElementById('batch-template-zone')?.classList.add('has-preview');
-        }
-        if (cfg?.selectedOrderIds?.length) {
-            renderBatchChannelOrderPicker(_batchChannelPickerOrders, cfg.selectedOrderIds);
-        }
+        applyBatchChannelConfigToForm(cfg);
     }, (err) => console.error('[BatchChannel] config listener:', err)));
 
     fbUnsub('batchChannelOrdersPick');

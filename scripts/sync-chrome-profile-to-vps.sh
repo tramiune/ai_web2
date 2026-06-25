@@ -13,8 +13,8 @@
 
 set -euo pipefail
 
-VPS_USER="${VPS_USER:-hoang1432001}"
-VPS_HOST="${VPS_HOST:-136.119.193.255}"
+VPS_USER="${VPS_USER:-root}"
+VPS_HOST="${VPS_HOST:-165.101.46.68}"
 VPS="${VPS_USER}@${VPS_HOST}"
 
 REAL_CHROME="${REAL_CHROME:-$HOME/Library/Application Support/Google/Chrome}"
