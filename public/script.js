@@ -819,7 +819,7 @@ export async function initAppLogic() {
 
             currentUser = null;
             hideAuthLoading();
-            handleUserLoggedOut(true);
+            handleUserLoggedOut(false);
         } catch (e) {
             console.error("Auth Change Error:", e);
             hideAuthLoading();
@@ -962,7 +962,7 @@ function showExternalBrowserRequiredModal() {
     applyTranslations();
 }
 
-function promptGoogleSignIn(autoPopup = false) {
+function promptGoogleSignIn() {
     if (requiresExternalBrowser()) {
         showExternalBrowserRequiredModal();
         return;
@@ -979,10 +979,6 @@ function promptGoogleSignIn(autoPopup = false) {
     if (inAppNote) inAppNote.style.display = 'none';
     authModal.style.display = 'flex';
     applyTranslations();
-    if (autoPopup && !window.__googleSignInAutoAttempted) {
-        window.__googleSignInAutoAttempted = true;
-        setTimeout(() => login(), 600);
-    }
 }
 
 window.copyPageLinkForExternal = async (url) => {
@@ -1380,7 +1376,6 @@ async function login() {
 async function logout() {
     const { auth, signOut } = window.firebase;
     try {
-        delete window.__googleSignInAutoAttempted;
         await signOut(auth);
         showToast(t('common.toast_logout_success'));
     } catch (error) {
@@ -1686,7 +1681,7 @@ function navigateFromURLParam() {
     }
 }
 
-function handleUserLoggedOut(autoGoogleSignIn = false) {
+function handleUserLoggedOut() {
     if (requiresExternalBrowser()) {
         showExternalBrowserRequiredModal();
         const loginBtn = document.getElementById('login-btn');
@@ -1694,7 +1689,7 @@ function handleUserLoggedOut(autoGoogleSignIn = false) {
         if (loginBtn) loginBtn.style.display = 'none';
         if (loginSection) loginSection.style.display = 'none';
     } else {
-        promptGoogleSignIn(autoGoogleSignIn);
+        promptGoogleSignIn();
         const loginBtn = document.getElementById('login-btn');
         const loginSection = document.getElementById('login-section');
         if (loginBtn) loginBtn.style.display = 'flex';
