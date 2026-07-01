@@ -100,6 +100,7 @@ from user_order_notes import (
     USER_NOTE_FILES_INVALID,
     USER_NOTE_FILES_MISSING,
     USER_NOTE_ORDER_FAILED,
+    USER_NOTE_SUBMIT_FAILED,
     is_invalid_order_media_error,
     user_note_from_vae_error,
 )
@@ -236,6 +237,9 @@ def _xiaoyang_modal_for_order(order_data: dict) -> tuple[str, str]:
 def _order_render_provider(order_data: dict) -> str:
     if not order_data:
         return RENDER_PROVIDER_AIDANCING
+    model_id = str(order_data.get("modelId") or "").strip()
+    if model_id in QUALITY_MODEL_IDS or model_id in QUALITY_30_MODEL_IDS or model_id in ECONOMY_MODEL_IDS:
+        return RENDER_PROVIDER_VIDEOAIEASY
     rp = (order_data.get("renderProvider") or "").strip().lower()
     if rp in _RENDER_PROVIDERS:
         return rp
@@ -1708,7 +1712,7 @@ def _try_submit_videoaieasy(order_id) -> bool:
 
 
 def submit_order(order_id):
-    """Nạp đơn theo renderProvider trên đơn (nếu có) hoặc engine Admin."""
+    """Nạp đơn theo model/renderProvider — không fallback giữa engine."""
     doc_ref = db.collection("orders").document(order_id)
     doc = doc_ref.get()
     if not doc.exists:
@@ -1734,11 +1738,7 @@ def submit_order(order_id):
         )
         return
 
-    provider = (
-        _order_render_provider(data)
-        if data.get("renderProvider")
-        else get_active_render_provider()
-    )
+    provider = _order_render_provider(data)
 
     if provider == RENDER_PROVIDER_AIDANCING:
         submit_to_aidancing(order_id)
@@ -1747,21 +1747,31 @@ def submit_order(order_id):
     if provider == RENDER_PROVIDER_XIAOYANG:
         if _try_submit_xiaoyang(order_id):
             return
-        print(f"⚠️ XiaoYang không nạp được {order_id} → thử VideoAiEasy")
-        if _try_submit_videoaieasy(order_id):
-            return
-        print(f"⚠️ VideoAiEasy không nạp được {order_id} → chuyển Aidancing")
-        submit_to_aidancing(order_id, fallback_reason="xiaoyang_fail")
+        doc = doc_ref.get()
+        data = doc.to_dict() or {}
+        if data.get("status") == "pending":
+            _fail_order_processing(
+                doc,
+                data,
+                "Không nạp được XiaoYang",
+                USER_NOTE_SUBMIT_FAILED,
+                "submit xiaoyang",
+            )
         return
 
     if provider == RENDER_PROVIDER_VIDEOAIEASY:
         if _try_submit_videoaieasy(order_id):
             return
-        print(f"⚠️ VideoAiEasy không nạp được {order_id} → thử XiaoYang")
-        if _try_submit_xiaoyang(order_id):
-            return
-        print(f"⚠️ XiaoYang không nạp được {order_id} → chuyển Aidancing")
-        submit_to_aidancing(order_id, fallback_reason="videoaieasy_fail")
+        doc = doc_ref.get()
+        data = doc.to_dict() or {}
+        if data.get("status") == "pending":
+            _fail_order_processing(
+                doc,
+                data,
+                "Không nạp được VideoAiEasy",
+                user_note_from_vae_error(None),
+                "submit videoaieasy",
+            )
         return
 
     submit_to_aidancing(order_id)

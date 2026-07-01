@@ -140,7 +140,13 @@ const MODELS = {
         isNew: true,
     },
     // "Model thường" uses Aidancing model id 124
-    fast: { nameKey: "modals.model_fast", cost: 10, timeKey: "modals.model_fast_desc", modelId: "124" },
+    fast: {
+        nameKey: "modals.model_fast",
+        cost: 10,
+        timeKey: "modals.model_fast_desc",
+        modelId: "124",
+        renderProvider: "aidancing",
+    },
     quality30: {
         nameKey: "modals.model_quality30",
         cost: 20,
