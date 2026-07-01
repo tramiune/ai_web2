@@ -157,10 +157,10 @@ const MODELS = {
 function getSelectedModelKey() {
     const promo = getDailyPromoStatus(FB_CACHE.myOrders || [], FB_CACHE.userProfile);
     if (promo.canUsePromo) return DAILY_PROMO_MODEL_KEY;
-    return document.querySelector('input[name="model-type"]:checked')?.value || 'quality';
+    return document.querySelector('input[name="model-type"]:checked')?.value || 'fast';
 }
 
-function selectDefaultModel(modelKey = 'quality') {
+function selectDefaultModel(modelKey = 'fast') {
     const radio = document.querySelector(`input[name="model-type"][value="${modelKey}"]`);
     if (radio) radio.checked = true;
     updateModelSelectionUI();
@@ -834,7 +834,7 @@ export async function initAppLogic() {
     initPremiumEffects();
     setupEventListeners();
     syncVideos();
-    selectDefaultModel('quality');
+    selectDefaultModel('fast');
     // Initial UI update for first order offer
     updateFirstOrderUI();
     // Check maintenance status
@@ -2414,7 +2414,7 @@ window.openOrderModal = () => {
     if (promo.canUsePromo) {
         updateFirstOrderUI();
     } else {
-        selectDefaultModel('quality');
+        selectDefaultModel('fast');
     }
     window.switchVideoSource('upload');
     window.openModal('order-modal');
@@ -3872,7 +3872,7 @@ async function setupEventListeners() {
                             updateFirstOrderUI();
 
                             document.getElementById('order-form').reset();
-                            selectDefaultModel('quality');
+                            selectDefaultModel('fast');
                             ['preview-char-container', 'preview-video-container', 'preview-library-video-container', 'preview-tiktok-video-container'].forEach((id) => {
                                 const el = document.getElementById(id);
                                 if (el) {
