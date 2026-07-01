@@ -164,6 +164,7 @@ function selectDefaultModel(modelKey = 'fast') {
     const radio = document.querySelector(`input[name="model-type"][value="${modelKey}"]`);
     if (radio) radio.checked = true;
     updateModelSelectionUI();
+    updateFirstOrderUI();
 }
 
 function updateModelSelectionUI() {
@@ -622,6 +623,8 @@ export function applyTranslations() {
     }
     renderShowcase();
     renderServicePackages();
+    updateModelSelectionUI();
+    updateFirstOrderUI();
 }
 
 window.toggleLangMenu = (e) => {
@@ -2412,10 +2415,11 @@ window.openOrderModal = () => {
     if (blockIfUpgradeMaintenance()) return;
     const promo = getDailyPromoStatus(FB_CACHE.myOrders || [], FB_CACHE.userProfile);
     if (promo.canUsePromo) {
-        updateFirstOrderUI();
+        selectDefaultModel(DAILY_PROMO_MODEL_KEY);
     } else {
         selectDefaultModel('fast');
     }
+    updateFirstOrderUI();
     window.switchVideoSource('upload');
     window.openModal('order-modal');
 
