@@ -388,7 +388,7 @@
                         <button class="btn-topup-inline" onclick="window.openTopupModal()" type="button">
                             <span class="btn-topup-inline__label">Nạp coin</span>
                         </button>
-                        <button type="button" id="home-auto-video-btn" class="btn-auto-video" onclick="window.openBatchChannelModal()">
+                        <button type="button" id="home-auto-video-btn" class="btn-auto-video" onclick="window.openBatchChannelModal()" style="display: none !important;">
                             <span class="btn-auto-video__icon" aria-hidden="true">✨</span>
                             <span data-i18n="dashboard.auto_video_btn">Tạo video tự động</span>
                             <span class="auto-video-new-badge" data-i18n="dashboard.auto_video_new">MỚI</span>
@@ -1120,6 +1120,22 @@
                             </label>
                             <label class="card compact-card model-card-pick" style="cursor: pointer; padding: 0.8rem; position: relative;">
                                 <span class="model-new-badge" data-i18n="modals.model_new_badge">MỚI</span>
+                                <input type="radio" name="model-type" value="quality15" checked>
+                                <div class="card-content-inline"
+                                    style="flex-direction: column; align-items: center; text-align: center; gap: 4px;">
+                                    <div style="font-weight: 700; font-size: 0.85rem;" data-i18n="modals.model_quality15">
+                                        Mượt &amp; giữ mặt</div>
+                                    <div style="font-size: 0.7rem; color: var(--text-muted);"
+                                        data-i18n="modals.model_quality15_desc">720p · tối đa 15s · giữ mặt</div>
+                                    <div
+                                        style="color: var(--accent); font-weight: 800; font-size: 0.85rem; display: flex; align-items: center; gap: 4px;">
+                                        <span id="model-quality15-cost">14</span>
+                                        <span style="font-size: 0.65rem; opacity: 0.8;">Coins</span>
+                                    </div>
+                                </div>
+                            </label>
+                            <label class="card compact-card model-card-pick" style="cursor: pointer; padding: 0.8rem; display: none;">
+                                <span class="model-new-badge" data-i18n="modals.model_new_badge">MỚI</span>
                                 <input type="radio" name="model-type" value="quality">
                                 <div class="card-content-inline"
                                     style="flex-direction: column; align-items: center; text-align: center; gap: 4px;">
@@ -1135,7 +1151,7 @@
                                 </div>
                             </label>
                             <label class="card compact-card model-card-pick" style="cursor: pointer; padding: 0.8rem;">
-                                <input type="radio" name="model-type" value="fast" checked>
+                                <input type="radio" name="model-type" value="fast">
                                 <div class="card-content-inline"
                                     style="flex-direction: column; align-items: center; text-align: center; gap: 4px;">
                                     <div style="font-weight: 700; font-size: 0.85rem;" data-i18n="modals.model_fast">
@@ -1149,7 +1165,7 @@
                                     </div>
                                 </div>
                             </label>
-                            <label class="card compact-card model-card-pick" style="cursor: pointer; padding: 0.8rem; position: relative;">
+                            <label class="card compact-card model-card-pick" style="cursor: pointer; padding: 0.8rem; display: none;">
                                 <span class="model-new-badge" data-i18n="modals.model_new_badge">MỚI</span>
                                 <input type="radio" name="model-type" value="quality30">
                                 <div class="card-content-inline"
@@ -1324,7 +1340,7 @@
         import { getStorage, ref, uploadBytesResumable, getDownloadURL } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-storage.js";
 
         import { firebaseConfig, ADMIN_EMAILS } from "./firebase-config.js";
-        import { initAppLogic } from "./script.js?v=2";
+        import { initAppLogic } from "./script.js?v=6";
 
         const app = initializeApp(firebaseConfig);
         let analytics = null;
