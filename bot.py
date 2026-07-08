@@ -32,7 +32,9 @@ from videoaieasy_web import (
     MODEL_KLING_30,
     QUALITY_MODEL_IDS,
     QUALITY_30_MODEL_IDS,
+    QUALITY_15_MODEL_IDS,
     ECONOMY_MODEL_IDS,
+    ROBONEO_RELAY_MODEL_IDS,
     VAE_API_MODEL_WEAVY,
     prepare_character_image_for_vae,
     prepare_motion_video_for_vae_upload,
@@ -84,10 +86,12 @@ VIDEOAIEASY_POLL_INTERVAL_SEC = int(os.environ.get("VIDEOAIEASY_POLL_INTERVAL_SE
 RENDER_PROVIDER_AIDANCING = "aidancing"
 RENDER_PROVIDER_XIAOYANG = "xiaoyang"
 RENDER_PROVIDER_VIDEOAIEASY = "videoaieasy"
+RENDER_PROVIDER_ROBONEO = "roboneo"
 _RENDER_PROVIDERS = (
     RENDER_PROVIDER_AIDANCING,
     RENDER_PROVIDER_XIAOYANG,
     RENDER_PROVIDER_VIDEOAIEASY,
+    RENDER_PROVIDER_ROBONEO,
 )
 
 # Aidancing modelId trên web (script.js): fast=124/125, quality30=129 (VAE)
@@ -238,11 +242,15 @@ def _order_render_provider(order_data: dict) -> str:
     if not order_data:
         return RENDER_PROVIDER_AIDANCING
     model_id = str(order_data.get("modelId") or "").strip()
-    if model_id in QUALITY_MODEL_IDS or model_id in QUALITY_30_MODEL_IDS or model_id in ECONOMY_MODEL_IDS:
-        return RENDER_PROVIDER_VIDEOAIEASY
     rp = (order_data.get("renderProvider") or "").strip().lower()
+    if model_id in ROBONEO_RELAY_MODEL_IDS and rp == RENDER_PROVIDER_ROBONEO:
+        return RENDER_PROVIDER_ROBONEO
+    if model_id in QUALITY_MODEL_IDS or model_id in QUALITY_30_MODEL_IDS or model_id in ECONOMY_MODEL_IDS or model_id in QUALITY_15_MODEL_IDS:
+        return RENDER_PROVIDER_VIDEOAIEASY
     if rp in _RENDER_PROVIDERS:
         return rp
+    if order_data.get("roboneoTaskId"):
+        return RENDER_PROVIDER_ROBONEO
     if order_data.get("videoaieasyJobId"):
         return RENDER_PROVIDER_VIDEOAIEASY
     if order_data.get("xiaoyangTaskId"):
@@ -262,7 +270,7 @@ def _use_videoaieasy() -> bool:
 
 def _videoaieasy_model_for_order(order_data: dict) -> str:
     model_id = str((order_data or {}).get("modelId") or "").strip()
-    if model_id in QUALITY_MODEL_IDS or model_id in QUALITY_30_MODEL_IDS or model_id in ECONOMY_MODEL_IDS:
+    if model_id in QUALITY_MODEL_IDS or model_id in QUALITY_30_MODEL_IDS or model_id in ECONOMY_MODEL_IDS or model_id in QUALITY_15_MODEL_IDS:
         return VAE_API_MODEL_WEAVY
     if model_id in AIDANCING_TURBO_MODEL_IDS:
         return MODEL_KLING_30
@@ -833,8 +841,11 @@ def _http_poll_videoaieasy_orders(orders_to_check):
 
 
 def _min_render_sec_for_order(order_data: dict) -> int:
-    if _order_render_provider(order_data) == RENDER_PROVIDER_VIDEOAIEASY:
+    rp = _order_render_provider(order_data)
+    if rp == RENDER_PROVIDER_VIDEOAIEASY:
         return VIDEOAIEASY_MIN_RENDER_SEC
+    if rp == RENDER_PROVIDER_ROBONEO:
+        return int(os.environ.get("ROBONEO_MIN_RENDER_SEC", "300"))
     return MIN_RENDER_SEC
 
 
@@ -844,6 +855,7 @@ def _processing_monitor_state():
     ad_eligible = []
     xy_eligible = []
     vae_eligible = []
+    rb_eligible = []
     vae_processing_count = 0
     with _processing_cache_lock:
         stale_ids = []
@@ -871,11 +883,14 @@ def _processing_monitor_state():
             elif rp == RENDER_PROVIDER_VIDEOAIEASY:
                 if d.get("videoaieasyJobId"):
                     vae_eligible.append(doc)
+            elif rp == RENDER_PROVIDER_ROBONEO:
+                if d.get("roboneoRelayId") or d.get("roboneoTaskId"):
+                    rb_eligible.append(doc)
             else:
                 job_id = d.get("aidancingJobId")
                 if job_id and job_id != "MANUAL":
                     ad_eligible.append(doc)
-    return ad_eligible, xy_eligible, vae_eligible, processing_count, vae_processing_count
+    return ad_eligible, xy_eligible, vae_eligible, rb_eligible, processing_count, vae_processing_count
 
 
 def on_processing_orders_snapshot(snapshot, changes, read_time):
@@ -1622,13 +1637,13 @@ def check_finished_orders_api():
     if not is_bot_enabled():
         return
     _maybe_refresh_processing_cache()
-    ad_orders, xy_orders, vae_orders, _, _ = _processing_monitor_state()
-    if not ad_orders and not xy_orders and not vae_orders:
+    ad_orders, xy_orders, vae_orders, rb_orders, _, _ = _processing_monitor_state()
+    if not ad_orders and not xy_orders and not vae_orders and not rb_orders:
         return
 
     print(
         f"\n🔍 [MONITOR/HTTP] Poll Aidancing={len(ad_orders)} XiaoYang={len(xy_orders)} "
-        f"VideoAiEasy={len(vae_orders)} "
+        f"VideoAiEasy={len(vae_orders)} RoboNeo relay={len(rb_orders)} "
         f"(VAE: sau {VIDEOAIEASY_MIN_RENDER_SEC // 60}p, mỗi {VIDEOAIEASY_POLL_INTERVAL_SEC}s; "
         f"khác: sau {MIN_RENDER_SEC // 60}p)..."
     )
@@ -1653,6 +1668,112 @@ def check_finished_orders_api():
             _http_poll_videoaieasy_orders(vae_orders)
         except Exception as e:
             print(f"❌ Lỗi monitor VideoAiEasy HTTP: {e}")
+    if rb_orders:
+        try:
+            poll_kaling_roboneo_relay_orders(rb_orders)
+        except Exception as e:
+            print(f"❌ Lỗi monitor RoboNeo relay: {e}")
+
+def _use_kaling_roboneo_relay(order_data: dict) -> bool:
+    from kaling_roboneo_relay import relay_configured
+
+    if not relay_configured():
+        return False
+    model_id = str((order_data or {}).get("modelId") or "").strip()
+    if model_id not in ROBONEO_RELAY_MODEL_IDS:
+        return False
+    rp = ((order_data or {}).get("renderProvider") or "").strip().lower()
+    return rp == RENDER_PROVIDER_ROBONEO
+
+
+def submit_to_kaling_roboneo_relay(order_id: str) -> bool:
+    from kaling_roboneo_relay import submit_order_via_relay
+
+    if not is_bot_enabled():
+        return False
+    with _submitting_orders_lock:
+        if order_id in _submitting_orders:
+            return False
+        _submitting_orders.add(order_id)
+    data: dict = {}
+    try:
+        doc_ref = db.collection("orders").document(order_id)
+        doc = doc_ref.get()
+        if not doc.exists:
+            return False
+        data = doc.to_dict() or {}
+        if data.get("status") != "pending":
+            return False
+        print(f"\n⚡ [NẠP ĐƠN / Kaling relay RoboNeo] {order_id} — model {data.get('modelId')}…")
+        out = submit_order_via_relay(order_id, data)
+        if not out:
+            return False
+        _mark_order_processing(
+            doc_ref,
+            out["taskId"],
+            provider=RENDER_PROVIDER_ROBONEO,
+            roboneo_room_id=out.get("roomId"),
+            roboneo_account_email=out.get("accountEmail"),
+        )
+        extra = {
+            "kalingRoboNeoRelay": True,
+            "roboneoRelayId": out.get("relayId"),
+        }
+        if out.get("refPlan"):
+            extra["roboneoRefPlan"] = out["refPlan"]
+        doc_ref.update(extra)
+        print(f"✅ Đơn {order_id} → processing (Kaling relay RoboNeo)")
+        return True
+    except Exception as e:
+        print(f"❌ Kaling relay RoboNeo {order_id}: {e}")
+        return False
+    finally:
+        with _submitting_orders_lock:
+            _submitting_orders.discard(order_id)
+
+
+def poll_kaling_roboneo_relay_orders(orders_to_check):
+    from kaling_roboneo_relay import download_relay_video, poll_relay
+
+    for doc in orders_to_check:
+        order_data = doc.to_dict() or {}
+        relay_id = str(order_data.get("roboneoRelayId") or "").strip()
+        if not relay_id:
+            continue
+        print(f"🧐 Kaling relay — {relay_id[:8]}… (đơn {doc.id})")
+        try:
+            st = poll_relay(relay_id)
+        except Exception as e:
+            print(f"❌ Poll relay {relay_id}: {e}")
+            continue
+        status = (st.get("status") or "").lower()
+        if status == "failed":
+            _fail_order_processing(
+                doc,
+                order_data,
+                st.get("error") or "relay failed",
+                USER_NOTE_ORDER_FAILED,
+                "render kaling relay",
+            )
+            continue
+        if status != "done":
+            print(f"⏳ Relay {relay_id[:8]}… {status or 'processing'}")
+            continue
+        if _skip_if_order_done(doc.id, "đã completed"):
+            continue
+        local_path = f"res_{doc.id}.mp4"
+        try:
+            download_relay_video(relay_id, local_path)
+            _complete_order_with_video(doc, local_path)
+        except Exception as e:
+            print(f"⚠️ Lỗi tải/hoàn đơn relay {doc.id}: {e}")
+            _fail_order_processing(
+                doc,
+                order_data,
+                str(e),
+                USER_NOTE_ORDER_FAILED,
+                "render kaling relay download",
+            )
 
 def _mark_order_processing(
     doc_ref,
@@ -1664,6 +1785,8 @@ def _mark_order_processing(
     xiaoyang_account_email=None,
     videoaieasy_account=None,
     videoaieasy_account_email=None,
+    roboneo_room_id=None,
+    roboneo_account_email=None,
 ):
     """Chỉ chuyển processing sau khi engine render đã nhận job."""
     payload = {
@@ -1686,6 +1809,12 @@ def _mark_order_processing(
             payload["videoaieasyAccount"] = str(videoaieasy_account)
         if videoaieasy_account_email:
             payload["videoaieasyAccountEmail"] = str(videoaieasy_account_email)
+    elif provider == RENDER_PROVIDER_ROBONEO:
+        payload["roboneoTaskId"] = str(job_id)
+        if roboneo_room_id:
+            payload["roboneoRoomId"] = str(roboneo_room_id)
+        if roboneo_account_email:
+            payload["roboneoAccountEmail"] = str(roboneo_account_email)
     else:
         payload["aidancingJobId"] = str(job_id)
     doc_ref.update(payload)
@@ -1739,6 +1868,35 @@ def submit_order(order_id):
         return
 
     provider = _order_render_provider(data)
+
+    if provider == RENDER_PROVIDER_ROBONEO:
+        if _use_kaling_roboneo_relay(data):
+            if submit_to_kaling_roboneo_relay(order_id):
+                return
+            doc = doc_ref.get()
+            data = doc.to_dict() or {}
+            if data.get("status") != "pending":
+                return
+            print(f"🔄 Kaling relay fail {order_id} → fallback VAE")
+            if _try_submit_videoaieasy(order_id):
+                return
+            if data.get("status") == "pending":
+                _fail_order_processing(
+                    doc,
+                    data,
+                    "Relay + VAE fail",
+                    user_note_from_vae_error(None),
+                    "submit roboneo relay",
+                )
+            return
+        _fail_order_processing(
+            doc,
+            data,
+            "RoboNeo relay chưa cấu hình",
+            USER_NOTE_SUBMIT_FAILED,
+            "submit roboneo",
+        )
+        return
 
     if provider == RENDER_PROVIDER_AIDANCING:
         submit_to_aidancing(order_id)
@@ -2314,7 +2472,7 @@ def check_finished_orders():
         if browser_lock.locked():
             return
 
-        ad_orders, _, _, _, _ = _processing_monitor_state()
+        ad_orders, _, _, _, _, _ = _processing_monitor_state()
         if not ad_orders:
             return
 
@@ -2706,12 +2864,12 @@ def start_bot():
 
     def monitor_loop():
         while True:
-            ad_eligible, xy_eligible, vae_eligible, processing, vae_processing = _processing_monitor_state()
+            ad_eligible, xy_eligible, vae_eligible, rb_eligible, processing, vae_processing = _processing_monitor_state()
             if is_bot_enabled():
                 check_finished_orders()
             if use_api_mode():
                 sleep_sec = _monitor_sleep_seconds(
-                    len(ad_eligible) + len(xy_eligible) + len(vae_eligible),
+                    len(ad_eligible) + len(xy_eligible) + len(vae_eligible) + len(rb_eligible),
                     processing,
                     vae_processing_count=vae_processing,
                 )

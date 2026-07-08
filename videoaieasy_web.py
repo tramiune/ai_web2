@@ -36,10 +36,13 @@ MODEL_KLING_30 = "kling-3.0"
 DEFAULT_VAE_RESOLUTION = "720p"
 QUALITY_MODEL_IDS = frozenset({"127"})
 QUALITY_30_MODEL_IDS = frozenset({"129"})
+QUALITY_15_MODEL_IDS = frozenset({"131"})
 ECONOMY_MODEL_IDS = frozenset({"128"})
+ROBONEO_RELAY_MODEL_IDS = ECONOMY_MODEL_IDS | QUALITY_15_MODEL_IDS
 VAE_API_MODEL_WEAVY = "weavy-kling-26"
 VAE_QUALITY_DURATION_SEC = 20
 VAE_QUALITY_30_DURATION_SEC = 30
+VAE_QUALITY_15_DURATION_SEC = 15
 VAE_ECONOMY_DURATION_SEC = 10
 TURBO_MODEL_IDS = frozenset({"117", "125"})
 VAE_MAX_UPLOAD_BYTES = int(get_env("VIDEOAIEASY_MAX_UPLOAD_BYTES", str(50 * 1024 * 1024)))
@@ -588,7 +591,7 @@ def profile_credits(profile: dict | None) -> int:
 def vae_motion_api_model(model_id: str | None = None) -> str:
     """Gói Mượt & giữ mặt (127/129) + Tiết kiệm (128) → weavy-kling-26."""
     mid = str(model_id or "").strip()
-    if mid in QUALITY_MODEL_IDS or mid in QUALITY_30_MODEL_IDS or mid in ECONOMY_MODEL_IDS:
+    if mid in QUALITY_MODEL_IDS or mid in QUALITY_30_MODEL_IDS or mid in ECONOMY_MODEL_IDS or mid in QUALITY_15_MODEL_IDS:
         return VAE_API_MODEL_WEAVY
     return MODEL_KLING_26
 
@@ -604,6 +607,8 @@ def duration_for_order(order_data: dict | None) -> int:
         return VAE_QUALITY_30_DURATION_SEC
     if model_id in QUALITY_MODEL_IDS:
         return VAE_QUALITY_DURATION_SEC
+    if model_id in QUALITY_15_MODEL_IDS:
+        return VAE_QUALITY_15_DURATION_SEC
     if model_id in ECONOMY_MODEL_IDS:
         return VAE_ECONOMY_DURATION_SEC
     return VAE_ECONOMY_DURATION_SEC

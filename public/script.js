@@ -29,7 +29,8 @@ const COIN_PACKAGES = [
     { id: 'starter_v2', name: 'Starter',    coins: 20,   price: '40.000đ',   amount: 40000,   hasBonus: false, oneTime: true },
     { id: 'creator',    name: 'Creator',    coins: 100,  price: '100.000đ',  amount: 100000, featured: true, hasBonus: true },
     { id: 'studio',     name: 'Studio',     coins: 550,  price: '500.000đ',  amount: 500000,  hasBonus: true },
-    { id: 'pro-studio', name: 'Enterprise', coins: 1100, price: '1.000.000đ', amount: 1000000, hasBonus: true }
+    { id: 'pro-studio', name: 'Enterprise', coins: 1100, price: '1.000.000đ', amount: 1000000, hasBonus: true },
+    { id: 'hocvien_package', name: 'Gói Học Viên', coins: 0, price: '699.000đ', amount: 699000, featured: true, hasBonus: false }
 ];
 
 const AI_MODELS = [
@@ -392,10 +393,16 @@ async function refreshStarterTopupEligibility() {
 }
 
 function getVisibleCoinPackages() {
-    return COIN_PACKAGES.filter((pkg) => {
+    let list = COIN_PACKAGES.filter((pkg) => {
         if (pkg.oneTime && pkg.id === 'starter_v2' && starterTopupUsed) return false;
         return true;
     });
+    list = list.filter(p => p.id !== 'hocvien_package');
+    const hocvien = COIN_PACKAGES.find(p => p.id === 'hocvien_package');
+    if (hocvien) {
+        list.splice(1, 0, hocvien);
+    }
+    return list;
 }
 let referralEarningsUnsubscribe = null; // Cleanup handle for referralEarnings onSnapshot (legacy - giờ dùng FB_LISTENERS)
 let referralCurrentCode = null; // User's referral code, populated when opening referral page
@@ -1986,6 +1993,49 @@ function renderPricing() {
     const buildCoinCard = (pkg, { showFeatures = false } = {}) => {
         const noteText = t(`pricing.notes.${pkg.id}`);
         const showNote = noteText && !noteText.startsWith('pricing.notes.');
+
+        // Custom render for Gói Học Viên (Student Course Package)
+        if (pkg.id === 'hocvien_package') {
+            const courseTitle = t('pricing.packages.hocvien_package') || 'Gói Học Viên';
+            const featuresList = `
+                <ul class="pkg-features" style="text-align: left; margin: 12px 0; padding-left: 0; list-style: none; font-size: 0.82rem; line-height: 1.6; color: #ececf1; display: flex; flex-direction: column; gap: 8px;">
+                    <li style="display: flex; gap: 8px; align-items: flex-start;"><span style="color: #fbbf24;">🌱</span> <span>Giá học viên: <strong>3k/video</strong></span></li>
+                    <li style="display: flex; gap: 8px; align-items: flex-start;"><span style="color: #fbbf24;">🌱</span> <span>Học <strong>1 kèm 1</strong> thực chiến</span></li>
+                    <li style="display: flex; gap: 8px; align-items: flex-start;"><span style="color: #fbbf24;">🌱</span> <span>Tặng <strong>tool làm video</strong> (299k)</span></li>
+                </ul>
+            `;
+            return `
+            <div class="price-card price-card--coin featured price-card--coin-featured" style="
+                background: linear-gradient(135deg, rgba(28, 22, 16, 0.9) 0%, rgba(18, 14, 10, 0.96) 100%) !important;
+                border: 2px solid #eab308 !important;
+                box-shadow: 0 0 25px rgba(234, 179, 8, 0.25) !important;
+                position: relative;
+                transform: scale(1.02);
+            ">
+                <div class="featured-badge" style="background: #eab308; color: #000; font-weight: 800;">🔥 ${courseTitle.toUpperCase()}</div>
+                <div class="price-card-note" style="color: #fbbf24; font-weight: 700; font-size: 0.85rem; text-transform: uppercase;">${showNote ? noteText : 'ƯU ĐÃI KHÓA HỌC'}</div>
+                
+                <div style="margin: 15px 0 10px 0; text-align: center;">
+                    <span style="font-size: 0.85rem; color: var(--text-muted); text-decoration: line-through; display: block; margin-bottom: 2px;">Gốc 1.500.000đ</span>
+                    <span style="font-size: 1.8rem; font-weight: 800; color: #fff; background: linear-gradient(135deg, #fef08a 0%, #eab308 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">699.000đ</span>
+                </div>
+
+                ${featuresList}
+
+                <div class="pricing-pay-actions" style="display: flex; gap: 8px; width: 100%; margin-top: 10px;">
+                    <button type="button" class="pricing-pay-btn pricing-pay-btn--vietqr" onclick="window.selectTopup('${pkg.id}')" style="flex: 1.3; padding: 10px 8px; font-size: 0.78rem; border-radius: 8px; height: 38px; display: flex; align-items: center; justify-content: center; gap: 4px;">
+                        ${vietqrPayIcon}
+                        <span class="pricing-pay-label" style="font-size: 0.75rem; white-space: nowrap;">${t('pricing.pay_vietqr')}</span>
+                    </button>
+                    <a href="https://zalo.me/0965951536" target="_blank" rel="noopener noreferrer" class="btn-secondary" style="flex: 0.7; display: flex; align-items: center; justify-content: center; gap: 4px; padding: 10px 8px; font-size: 0.78rem; text-decoration: none; border-radius: 8px; background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1); color: #fff; font-weight: 600; height: 38px; box-sizing: border-box; line-height: 1; margin: 0;">
+                        <img src="/assets/zalo-icon.png" style="width: 14px; height: 14px; object-fit: contain;" />
+                        <span>Tư vấn</span>
+                    </a>
+                </div>
+            </div>
+            `;
+        }
+
         const featuresHtml = showFeatures ? `
             <ul class="pkg-features">
                 <li><span class="check-icon">✓</span> ${t('pricing.instant_credit')}</li>

@@ -246,13 +246,15 @@ window.TRANSLATIONS = {
                 starter_v2: "Chỉ nạp được 1 lần",
                 creator: "Tặng 50 Coin",
                 studio: "Tặng 300 Coin",
-                "pro-studio": "Tặng 600 Coin"
+                "pro-studio": "Tặng 600 Coin",
+                hocvien_package: "Ưu đãi khóa học"
             },
             packages: {
                 starter_v2: "Starter",
                 creator: "Creator",
                 studio: "Studio",
-                "pro-studio": "Enterprise"
+                "pro-studio": "Enterprise",
+                hocvien_package: "Gói Học Viên"
             },
             service_packages: {
                 plus: "Plus",
@@ -321,7 +323,7 @@ window.TRANSLATIONS = {
             action_view: "🔍 Xem",
             action_view_details: "Xem chi tiết",
             first_order_offer_title: "Ưu đãi mỗi ngày 🎁",
-            first_order_offer_desc: "Mỗi ngày <b>1 video</b> chỉ <b>1 Coin (~1.000đ)</b>. Tối đa <b>3 lần</b> trên mỗi tài khoản. Hết lượt trong ngày chờ <b>0h</b> (giờ VN).",
+            first_order_offer_desc: "Mỗi ngày <b>1 video</b> chỉ <b>1 Coin (~1.000đ)</b> — model <b>Mượt & giữ mặt 15s</b> (RoboNeo). Tối đa <b>3 lần</b>/tài khoản.",
             first_order_offer_cta: "Dùng ngay",
             daily_promo_note: "Ưu đãi 1 Coin: còn <b>{remaining}/{max}</b> lượt · 1 lượt/ngày",
             daily_promo_cta: "Tạo video (1 Coin · còn {remaining} lượt)",
@@ -407,6 +409,9 @@ window.TRANSLATIONS = {
             model_economy: "Tiết kiệm",
             model_economy_desc: "tối đa 10s · giữ mặt",
             model_economy_badge: "TIẾT KIỆM",
+            model_quality15: "Mượt & giữ mặt",
+            model_quality15_desc: "720p · tối đa 15s · giữ mặt",
+            promo_1coin_model_desc: "Mượt & giữ mặt · 720p · tối đa 15s (RoboNeo)",
             model_quality: "Mượt & giữ mặt",
             model_quality_desc: "1080p · tối đa 20s · giữ mặt",
             model_basic: "Model Tiêu chuẩn",
@@ -1020,13 +1025,15 @@ window.TRANSLATIONS = {
                 starter_v2: "One-time only",
                 creator: "Bonus 50 Coins",
                 studio: "Bonus 300 Coins",
-                "pro-studio": "Bonus 600 Coins"
+                "pro-studio": "Bonus 600 Coins",
+                hocvien_package: "Course offer"
             },
             packages: {
                 starter_v2: "Starter",
                 creator: "Creator",
                 studio: "Studio",
-                "pro-studio": "Enterprise"
+                "pro-studio": "Enterprise",
+                hocvien_package: "Student Package"
             },
             service_packages: {
                 plus: "Plus",
@@ -1095,7 +1102,7 @@ window.TRANSLATIONS = {
             action_view: "🔍 View",
             action_view_details: "View Details",
             first_order_offer_title: "Daily deal 🎁",
-            first_order_offer_desc: "<b>1 video/day</b> at <b>1 Coin (~1,000 VND)</b>. Max <b>3 times</b> per account. Resets at <b>midnight</b> (VN time).",
+            first_order_offer_desc: "<b>1 video/day</b> at <b>1 Coin (~1,000 VND)</b> — <b>Smooth & keep face 15s</b> (RoboNeo). Max <b>3 times</b> per account.",
             first_order_offer_cta: "Use now",
             daily_promo_note: "1 Coin deal: <b>{remaining}/{max}</b> slots left · 1/day",
             daily_promo_cta: "Create video (1 Coin · {remaining} left)",
@@ -1181,6 +1188,9 @@ window.TRANSLATIONS = {
             model_economy: "Economy",
             model_economy_desc: "max 10s · keep face",
             model_economy_badge: "SAVE",
+            model_quality15: "Smooth & keep face",
+            model_quality15_desc: "720p · max 15s · face unchanged",
+            promo_1coin_model_desc: "Smooth & keep face · 720p · max 15s (RoboNeo)",
             model_quality: "Smooth & keep face",
             model_quality_desc: "1080p · max 20s · face unchanged",
             model_basic: "Standard Model",
