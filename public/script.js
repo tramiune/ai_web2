@@ -116,36 +116,41 @@ function gatewayLabel(gateway) {
     return gateway || '—';
 }
 
+const DEFAULT_MODEL_KEY = 'fast';
+const HIDDEN_MODEL_KEYS = new Set(['quality', 'quality30', 'economy', 'quality15']);
+
 const MODELS = {
     economy: {
         nameKey: "modals.model_economy",
         cost: 8,
         timeKey: "modals.model_economy_desc",
         modelId: "128",
-        renderProvider: "videoaieasy",
+        renderProvider: "roboneo",
         maxVideoSec: 10,
         vaeDurationSec: 10,
-        vaeResolution: "1080p",
+        vaeResolution: "720p",
         isEconomy: true,
     },
-    quality: {
-        nameKey: "modals.model_quality",
-        cost: 15,
-        timeKey: "modals.model_quality_desc",
-        modelId: "127",
-        renderProvider: "videoaieasy",
-        maxVideoSec: 20,
-        vaeDurationSec: 20,
-        vaeResolution: "1080p",
+    quality15: {
+        nameKey: "modals.model_quality15",
+        cost: 14,
+        timeKey: "modals.model_quality15_desc",
+        modelId: "131",
+        renderProvider: "roboneo",
+        maxVideoSec: 15,
+        vaeDurationSec: 15,
+        vaeResolution: "720p",
         isNew: true,
     },
-    // "Model thường" uses Aidancing model id 124
     fast: {
         nameKey: "modals.model_fast",
         cost: 10,
         timeKey: "modals.model_fast_desc",
-        modelId: "124",
+        modelId: "160",
         renderProvider: "aidancing",
+        maxVideoSec: 20,
+        vaeDurationSec: 20,
+        vaeResolution: "720p",
     },
     quality30: {
         nameKey: "modals.model_quality30",
@@ -163,10 +168,10 @@ const MODELS = {
 function getSelectedModelKey() {
     const promo = getDailyPromoStatus(FB_CACHE.myOrders || [], FB_CACHE.userProfile);
     if (promo.canUsePromo) return DAILY_PROMO_MODEL_KEY;
-    return document.querySelector('input[name="model-type"]:checked')?.value || 'fast';
+    return document.querySelector('input[name="model-type"]:checked')?.value || DEFAULT_MODEL_KEY;
 }
 
-function selectDefaultModel(modelKey = 'fast') {
+function selectDefaultModel(modelKey = DEFAULT_MODEL_KEY) {
     const radio = document.querySelector(`input[name="model-type"][value="${modelKey}"]`);
     if (radio) radio.checked = true;
     updateModelSelectionUI();
@@ -174,13 +179,21 @@ function selectDefaultModel(modelKey = 'fast') {
 }
 
 function updateModelSelectionUI() {
+    HIDDEN_MODEL_KEYS.forEach((modelKey) => {
+        const label = document.querySelector(`input[name="model-type"][value="${modelKey}"]`)?.closest('label');
+        if (label) label.style.display = 'none';
+    });
+    const checked = document.querySelector('input[name="model-type"]:checked');
+    if (checked && HIDDEN_MODEL_KEYS.has(checked.value)) {
+        const fallback = document.querySelector('input[name="model-type"][value="quality15"]')
+            || document.querySelector('input[name="model-type"][value="fast"]');
+        if (fallback) fallback.checked = true;
+    }
     const eCost = document.getElementById('model-economy-cost');
-    const qCost = document.getElementById('model-quality-cost');
-    const q30Cost = document.getElementById('model-quality30-cost');
+    const q15Cost = document.getElementById('model-quality15-cost');
     const fCost = document.getElementById('model-fast-cost');
     if (eCost) eCost.textContent = String(MODELS.economy.cost);
-    if (qCost) qCost.textContent = String(MODELS.quality.cost);
-    if (q30Cost) q30Cost.textContent = String(MODELS.quality30.cost);
+    if (q15Cost) q15Cost.textContent = String(MODELS.quality15.cost);
     if (fCost) fCost.textContent = String(MODELS.fast.cost);
 }
 
@@ -238,7 +251,7 @@ let dailyPromoRemaining = 0; // Số lượt 1 coin còn lại trong ngày (VN, 
 const DAILY_PROMO_COST = 1;
 const DAILY_PROMO_PER_DAY = 1;
 const DAILY_PROMO_MAX_TOTAL = 3;
-const DAILY_PROMO_MODEL_KEY = 'quality';
+const DAILY_PROMO_MODEL_KEY = 'fast';
 const VN_TIMEZONE = 'Asia/Ho_Chi_Minh';
 
 function getVnDateString(date = new Date()) {
@@ -300,10 +313,15 @@ function resolvePromoCost(orders, baseCost, userData = null) {
 }
 
 function modelForDailyPromoOrder() {
-    const model = { ...localizedModel(DAILY_PROMO_MODEL_KEY) };
-    model.cost = DAILY_PROMO_COST;
-    model.dailyPromo = true;
-    return model;
+    const base = localizedModel(DAILY_PROMO_MODEL_KEY) || MODELS.fast;
+    return {
+        ...base,
+        modelId: '124',
+        renderProvider: 'aidancing',
+        maxVideoSec: 20,
+        cost: DAILY_PROMO_COST,
+        dailyPromo: true,
+    };
 }
 
 /** Trong Firestore transaction — dùng user doc + cache đơn (transaction.get chỉ nhận doc ref, không query). */
@@ -843,7 +861,7 @@ export async function initAppLogic() {
     initPremiumEffects();
     setupEventListeners();
     syncVideos();
-    selectDefaultModel('fast');
+    selectDefaultModel(DEFAULT_MODEL_KEY);
     // Initial UI update for first order offer
     updateFirstOrderUI();
     // Check maintenance status
@@ -2423,7 +2441,7 @@ window.openOrderModal = () => {
     if (promo.canUsePromo) {
         selectDefaultModel(DAILY_PROMO_MODEL_KEY);
     } else {
-        selectDefaultModel('fast');
+        selectDefaultModel(DEFAULT_MODEL_KEY);
     }
     updateFirstOrderUI();
     window.switchVideoSource('upload');
@@ -2473,7 +2491,7 @@ function updateFirstOrderUI() {
         const submitText = submitBtn ? submitBtn.querySelector('[data-i18n="hero.cta_create"]') : null;
         const summaryEl = document.getElementById('submit-summary-line');
         const modelKey = getSelectedModelKey();
-        const baseCost = localizedModel(modelKey)?.cost ?? MODELS.quality.cost;
+        const baseCost = localizedModel(modelKey)?.cost ?? MODELS.quality15.cost;
 
         costEl.innerText = promo.canUsePromo ? String(DAILY_PROMO_COST) : String(baseCost);
         if (submitBtn) submitBtn.classList.toggle('btn-first-offer', promo.canUsePromo);
@@ -2484,10 +2502,7 @@ function updateFirstOrderUI() {
         }
         if (summaryEl) {
             summaryEl.innerText = promo.canUsePromo
-                ? t('dashboard.daily_promo_summary', {
-                    remaining: promo.remainingTotal,
-                    max: DAILY_PROMO_MAX_TOTAL
-                })
+                ? t('modals.promo_1coin_model_desc')
                 : t(`modals.model_${modelKey}_desc`);
             summaryEl.style.color = '';
         }
@@ -2548,6 +2563,8 @@ function getSelectedModelMaxVideoSec() {
 }
 
 function getMaxVideoSecForOrder() {
+    const promo = getDailyPromoStatus(FB_CACHE.myOrders || [], FB_CACHE.userProfile);
+    if (promo.canUsePromo) return MODELS.quality15.maxVideoSec;
     return getSelectedModelMaxVideoSec();
 }
 
@@ -3673,14 +3690,7 @@ async function setupEventListeners() {
                 }
 
                 // Model thường: auto select Aidancing id by uploaded video duration
-                // <10s  -> 125
-                // 10-20 -> 124
-                if (modelKeySelected === 'fast' && window.currentVideoSource === 'upload' && videoFile) {
-                    const dur = await getVideoDurationSeconds(videoFile);
-                    if (typeof dur === 'number') {
-                        modelIdOverride = dur < 10 ? '125' : '124';
-                    }
-                }
+                // (Đã chuyển giao cho VPS backend site_bot.py tự động phân phối 159/160)
 
                 // Kiểm tra lại lần cuối trước khi upload
                 if (charFile.size > 10 * 1024 * 1024) {
@@ -3708,7 +3718,7 @@ async function setupEventListeners() {
                     if (!userDoc.exists()) throw t('common.error');
 
                     const modelKey = modelKeySelected;
-                    const baseModel = localizedModel(modelKey) || localizedModel('quality');
+                    const baseModel = localizedModel(modelKey) || localizedModel('quality15');
                     let model = { ...baseModel };
 
                     const userData = userDoc.data() || {};
@@ -3775,7 +3785,7 @@ async function setupEventListeners() {
                                 if (!userDoc.exists()) throw t('common.error');
 
                                 const modelKey = modelKeySelected;
-                                const baseModel = localizedModel(modelKey) || localizedModel('quality');
+                                const baseModel = localizedModel(modelKey) || localizedModel('quality15');
                                 let orderModel = { ...baseModel };
 
                                 const userData = userDoc.data() || {};
@@ -3882,7 +3892,7 @@ async function setupEventListeners() {
                             updateFirstOrderUI();
 
                             document.getElementById('order-form').reset();
-                            selectDefaultModel('fast');
+                            selectDefaultModel(DEFAULT_MODEL_KEY);
                             ['preview-char-container', 'preview-video-container', 'preview-library-video-container', 'preview-tiktok-video-container'].forEach((id) => {
                                 const el = document.getElementById(id);
                                 if (el) {
@@ -4496,7 +4506,7 @@ function scheduleRenderAdminBots() {
 }
 
 // Doc bots mà VPS dùng — admin đã có quyền ghi collection bots (không cần settings/render).
-const RENDER_PROVIDER_BOT_ID = 'nhaycloud_vps_bot';
+const RENDER_PROVIDER_BOT_ID = 'mac_nhaycloud_bot';
 
 let adminActiveRenderProvider = 'xiaoyang';
 
@@ -6805,7 +6815,7 @@ function batchChannelRunNowMode() {
 }
 
 function batchChannelPerVideoCost() {
-    return MODELS.quality.cost;
+    return MODELS.quality15.cost;
 }
 
 async function ensureBatchChannelCoins(triggerRun) {
