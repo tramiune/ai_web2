@@ -5478,3 +5478,34 @@ body.video-trim-active {
   }
 }
 
+/* API Portal styles */
+.navbar-api-btn {
+  background: rgba(234, 179, 8, 0.05);
+  border: 1px solid #eab308;
+  color: #eab308;
+  padding: 0.2rem 0.5rem;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-weight: 700;
+  font-size: 0.75rem;
+  transition: all 0.3s ease;
+  cursor: pointer;
+  height: 26px;
+  box-sizing: border-box;
+  box-shadow: 0 0 8px rgba(234, 179, 8, 0.15);
+}
+
+.navbar-api-btn:hover {
+  background: rgba(234, 179, 8, 0.15);
+  border-color: #fef08a;
+  color: #fef08a;
+  box-shadow: 0 0 12px rgba(234, 179, 8, 0.3);
+}
+
+.nav-icon-api {
+  width: 13px;
+  height: 13px;
+}
+
