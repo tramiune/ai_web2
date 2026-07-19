@@ -6,7 +6,7 @@ import { APP_CLIENT_VERSION } from "./app-version.js";
 
 export { APP_CLIENT_VERSION };
 
-const TELEGRAM_BOT_TOKEN = '8676046240:AAE14lDxAj9otGTjVnd8Smr2__Wg-J2dCLc';
+const TELEGRAM_BOT_TOKEN = '8855918099:AAHmPUWTe6_dicXyh0nseADQomVv6MGKjGQ';
 const TELEGRAM_CHAT_ID = '6067707939';
 
 // --- EmailJS Config ---
@@ -24,178 +24,21 @@ function safeToDate(field) {
     return new Date(field);
 }
 
-const PROMO_1_COIN_MAX_TOTAL = 3;
-const PROMO_1_COIN_MODEL_KEY = 'fast';
-const PROMO_1_COIN_TIMEZONE = 'Asia/Ho_Chi_Minh';
-const MAX_VIDEO_DURATION_SEC = 30;
-const MAX_REFERENCE_VIDEO_SEC = 20;
-const MAX_VIDEO_FILE_BYTES = 50 * 1024 * 1024;
-
-const KALING_HOSTS = ['kaling.cloud', 'www.kaling.cloud'];
-const KALING_PRICING = { coinPerSec: 0.6, maxVideoSec: 13 };
-
-function isKalingSite() {
-    const h = (location.hostname || '').toLowerCase();
-    return KALING_HOSTS.some((host) => h === host || h.endsWith('.' + host));
-}
-window.isKalingSite = isKalingSite;
-
-/** Thời lượng video đã chọn trên kaling — dùng tính giá động. */
-let kalingSelectedDurationSec = null;
-
-function kalingCoinsForDuration(sec) {
-    const d = Math.min(Math.max(Number(sec) || 0, 0.1), KALING_PRICING.maxVideoSec);
-    return Math.max(1, Math.ceil(d * KALING_PRICING.coinPerSec));
-}
-
-async function getVideoDurationFromUrl(url) {
-    if (!url) return null;
-    try {
-        const video = document.createElement('video');
-        video.preload = 'metadata';
-        video.crossOrigin = 'anonymous';
-        const duration = await new Promise((resolve, reject) => {
-            const cleanup = () => {
-                video.removeAttribute('src');
-                video.load();
-            };
-            video.onloadedmetadata = () => {
-                const d = Number(video.duration);
-                cleanup();
-                resolve(Number.isFinite(d) ? d : null);
-            };
-            video.onerror = () => {
-                cleanup();
-                reject(new Error('metadata error'));
-            };
-            video.src = url;
-        });
-        return duration;
-    } catch {
-        return null;
-    }
-}
-
-function getLocalDayKey(date = new Date(), timeZone = PROMO_1_COIN_TIMEZONE) {
-    const parts = new Intl.DateTimeFormat('en-CA', {
-        timeZone,
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit'
-    }).formatToParts(date);
-    const y = parts.find(p => p.type === 'year')?.value;
-    const m = parts.find(p => p.type === 'month')?.value;
-    const d = parts.find(p => p.type === 'day')?.value;
-    return `${y}-${m}-${d}`;
-}
-
-function isPromo1CoinOrder(order) {
-    return order?.promo1Coin === true || Number(order?.costCoins) === 1;
-}
-
-function computePromo1CoinStats(orders = [], userData = null) {
-    const promoOrders = (orders || []).filter(isPromo1CoinOrder);
-    const todayKey = getLocalDayKey();
-    const totalFromOrders = promoOrders.length;
-    const usedTodayFromOrders = promoOrders.some((o) => {
-        const created = safeToDate(o.createdAt);
-        return created && getLocalDayKey(created) === todayKey;
-    });
-    const totalFromUser = Number(userData?.promo1CoinCount) || 0;
-    const lastDayUser = userData?.promo1CoinLastDay || '';
-    const totalUsed = Math.max(totalFromOrders, totalFromUser);
-    const usedToday = usedTodayFromOrders || lastDayUser === todayKey;
-    const remainingTotal = Math.max(0, PROMO_1_COIN_MAX_TOTAL - totalUsed);
-    const eligible = remainingTotal > 0 && !usedToday;
-    return { eligible, totalUsed, usedToday, remainingTotal, todayKey };
-}
-
-function modelForPromo1CoinOrder() {
-    const base = localizedModel(PROMO_1_COIN_MODEL_KEY) || MODELS.fast;
-    return {
-        ...base,
-        modelId: '34',
-        renderProvider: 'aidancing',
-        maxVideoSec: 20,
-        cost: 1,
-        promo1Coin: true,
-    };
-}
-
-function getPromo1CoinEligibilityFromUser(userData) {
-    const todayKey = getLocalDayKey();
-    const totalUsed = Number(userData?.promo1CoinCount) || 0;
-    const usedToday = (userData?.promo1CoinLastDay || '') === todayKey;
-    const remainingTotal = Math.max(0, PROMO_1_COIN_MAX_TOTAL - totalUsed);
-    return {
-        eligible: remainingTotal > 0 && !usedToday,
-        totalUsed,
-        usedToday,
-        remainingTotal,
-        todayKey
-    };
-}
-
-async function ensureUserPromoFieldsSynced(orders, userData) {
-    if (!currentUser || !window.firebase) return;
-    const promoOrders = (orders || []).filter(isPromo1CoinOrder);
-    const countFromOrders = promoOrders.length;
-    const countFromUser = Number(userData?.promo1CoinCount) || 0;
-    if (countFromOrders <= countFromUser) return;
-
-    let lastDay = userData?.promo1CoinLastDay || '';
-    promoOrders.forEach((o) => {
-        const created = safeToDate(o.createdAt);
-        if (!created) return;
-        const dayKey = getLocalDayKey(created);
-        if (!lastDay || dayKey > lastDay) lastDay = dayKey;
-    });
-
-    const { db, doc, updateDoc } = window.firebase;
-    try {
-        await updateDoc(doc(db, 'users', currentUser.uid), {
-            promo1CoinCount: countFromOrders,
-            promo1CoinLastDay: lastDay,
-            updatedAt: window.firebase.serverTimestamp()
-        });
-    } catch (e) {
-        console.warn('[promo1coin] sync user fields failed:', e.message);
-    }
-}
-
-function syncPromo1CoinState(orders, userData = window.__currentUserData) {
-    promo1CoinStats = computePromo1CoinStats(orders, userData);
-    isFirstTimeUser = promo1CoinStats.eligible;
-    return promo1CoinStats;
-}
-
 // --- Data Constants ---
-// IMPORTANT: usdPrice here is for display only. Server-side `PACKAGES` in
-// functions/api/paypal.js is the source of truth for the actual charge.
-// Keep them in sync (id + coins + USD value).
 const COIN_PACKAGES = [
-    { id: 'starter_v2', name: 'Starter',    coins: 30,   price: '60.000đ',   usdPrice: '$2.99',  amount: 60000,   hasBonus: false },
-    { id: 'creator',    name: 'Creator',    coins: 100,  price: '100.000đ',  usdPrice: '$5.99',  amount: 100000, featured: true, hasBonus: true },
-    { id: 'studio',     name: 'Studio',     coins: 550,  price: '500.000đ',  usdPrice: '$24.99', amount: 500000,  hasBonus: true },
-    { id: 'pro-studio', name: 'Enterprise', coins: 1100, price: '1.000.000đ', usdPrice: '$49.99', amount: 1000000, hasBonus: true },
-    { id: 'hocvien_package', name: 'Gói Học Viên', coins: 0, price: '699.000đ', usdPrice: '$29.99', amount: 699000, featured: true, hasBonus: false }
+    { id: 'starter_v2', name: 'Starter',    coins: 20,   price: '40.000đ',   amount: 40000,   hasBonus: false, oneTime: true },
+    { id: 'creator',    name: 'Creator',    coins: 100,  price: '100.000đ',  amount: 100000, featured: true, hasBonus: true },
+    { id: 'studio',     name: 'Studio',     coins: 550,  price: '500.000đ',  amount: 500000,  hasBonus: true },
+    { id: 'pro-studio', name: 'Enterprise', coins: 1100, price: '1.000.000đ', amount: 1000000, hasBonus: true },
+    { id: 'hocvien_package', name: 'Gói Học Viên', coins: 0, price: '699.000đ', amount: 699000, featured: true, hasBonus: false }
 ];
-
-function getVisibleCoinPackages() {
-    let list = COIN_PACKAGES.filter(p => p.id !== 'hocvien_package');
-    const hocvien = COIN_PACKAGES.find(p => p.id === 'hocvien_package');
-    if (hocvien) {
-        list.splice(1, 0, hocvien);
-    }
-    return list;
-}
 
 const AI_MODELS = [
     {
         id: 'copy-motion-photo',
         titleKey: 'models.model1_title',
         descKey: 'models.model1_desc',
-        cost: 4,
+        cost: 15,
         serviceType: 'motion-to-char',
         demoChar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=300',
         demoRef: 'https://pub-2b53cd37b4a44642afdbb8bb470bde66.r2.dev/banner.mp4',
@@ -263,15 +106,7 @@ function serviceDisplayName(pkg) {
 }
 
 function supportedLangs() {
-    return window.LANG_CONFIG?.supported || ['vi', 'en'];
-}
-
-function detectLangFromBrowser() {
-    const langs = navigator.languages?.length ? navigator.languages : [navigator.language || ''];
-    for (const l of langs) {
-        if (String(l).toLowerCase().startsWith('vi')) return 'vi';
-    }
-    return 'en';
+    return window.LANG_CONFIG?.supported || ['vi', 'en', 'es', 'pt', 'th', 'id'];
 }
 
 function gatewayLabel(gateway) {
@@ -299,7 +134,7 @@ const MODELS = {
     },
     quality15: {
         nameKey: "modals.model_quality15",
-        cost: 12,
+        cost: 14,
         timeKey: "modals.model_quality15_desc",
         modelId: "131",
         renderProvider: "roboneo",
@@ -318,17 +153,6 @@ const MODELS = {
         vaeDurationSec: 20,
         vaeResolution: "720p",
     },
-    quality: {
-        nameKey: "modals.model_quality",
-        cost: 13,
-        timeKey: "modals.model_quality_desc",
-        modelId: "127",
-        renderProvider: "videoaieasy",
-        maxVideoSec: 20,
-        vaeDurationSec: 20,
-        vaeResolution: "1080p",
-        isNew: true,
-    },
     quality30: {
         nameKey: "modals.model_quality30",
         cost: 20,
@@ -338,27 +162,21 @@ const MODELS = {
         maxVideoSec: 30,
         vaeDurationSec: 30,
         vaeResolution: "1080p",
+        isNew: true,
     },
 };
 
 function getSelectedModelKey() {
-    if (isKalingSite()) return 'quality';
-    if (!isKalingSite() && promo1CoinStats.eligible) return PROMO_1_COIN_MODEL_KEY;
+    const promo = getDailyPromoStatus(FB_CACHE.myOrders || [], FB_CACHE.userProfile);
+    if (promo.canUsePromo) return DAILY_PROMO_MODEL_KEY;
     return document.querySelector('input[name="model-type"]:checked')?.value || DEFAULT_MODEL_KEY;
 }
 
 function selectDefaultModel(modelKey = DEFAULT_MODEL_KEY) {
-    if (isKalingSite()) modelKey = 'quality';
     const radio = document.querySelector(`input[name="model-type"][value="${modelKey}"]`);
     if (radio) radio.checked = true;
     updateModelSelectionUI();
     updateFirstOrderUI();
-}
-
-function getSelectedModelMaxVideoSec() {
-    if (isKalingSite()) return KALING_PRICING.maxVideoSec;
-    const m = MODELS[getSelectedModelKey()];
-    return m?.maxVideoSec ?? MAX_VIDEO_DURATION_SEC;
 }
 
 function updateModelSelectionUI() {
@@ -378,28 +196,9 @@ function updateModelSelectionUI() {
     if (eCost) eCost.textContent = String(MODELS.economy.cost);
     if (q15Cost) q15Cost.textContent = String(MODELS.quality15.cost);
     if (fCost) fCost.textContent = String(MODELS.fast.cost);
-    const sec = getSelectedModelMaxVideoSec();
-    document.querySelectorAll('[data-i18n="modals.tiktok_tab_hint"]').forEach((el) => {
-        el.textContent = t('modals.tiktok_tab_hint', { sec });
-    });
 }
 
 function localizedModel(key) {
-    if (isKalingSite()) {
-        const m = MODELS.quality;
-        const dur = kalingSelectedDurationSec;
-        const cost = dur != null ? kalingCoinsForDuration(dur) : null;
-        return {
-            ...m,
-            name: t('modals.kaling_package_name'),
-            time: t('modals.kaling_price_per_sec', {
-                rate: KALING_PRICING.coinPerSec,
-                max: KALING_PRICING.maxVideoSec,
-            }),
-            cost: cost ?? '—',
-            vaeDurationSec: dur != null ? Math.ceil(dur) : undefined,
-        };
-    }
     const m = MODELS[key];
     if (!m) return null;
     return {
@@ -445,14 +244,226 @@ async function getVideoDurationSeconds(file) {
 
 let currentUser = null;
 let selectedTopupPackage = null;
-let selectedPaymentMethod = 'vietqr';
-let isFirstTimeUser = false; // true when 1-coin promo is still available
-let promo1CoinStats = { eligible: false, totalUsed: 0, usedToday: false, remainingTotal: 0, todayKey: '' };
+let isFirstTimeUser = false; // Flag for special offer (0 or 1 order)
 let orderCount = 0; // Track total orders
+let dailyPromoRemaining = 0; // Số lượt 1 coin còn lại trong ngày (VN, reset 0h)
+
+/** Ưu đãi 1 Coin (~1.000đ): 1 lượt/ngày, tối đa 3 lần/user, reset 0h (VN). */
+const DAILY_PROMO_COST = 1;
+const DAILY_PROMO_PER_DAY = 1;
+const DAILY_PROMO_MAX_TOTAL = 3;
+const DAILY_PROMO_MODEL_KEY = 'fast';
+const VN_TIMEZONE = 'Asia/Ho_Chi_Minh';
+
+function getVnDateString(date = new Date()) {
+    return new Intl.DateTimeFormat('en-CA', { timeZone: VN_TIMEZONE }).format(date);
+}
+
+function promoStatusFromCounts(today, todayCount, totalCount) {
+    const remainingTotal = Math.max(0, DAILY_PROMO_MAX_TOTAL - totalCount);
+    const canUsePromo = remainingTotal > 0 && todayCount < DAILY_PROMO_PER_DAY;
+    return {
+        today,
+        todayCount,
+        totalCount,
+        remainingTotal,
+        remainingToday: canUsePromo ? 1 : 0,
+        canUsePromo
+    };
+}
+
+function getDailyPromoStatusFromOrders(orders = []) {
+    const today = getVnDateString();
+    const promoOrders = orders.filter((o) => o.dailyPromo === true);
+    const totalCount = promoOrders.length;
+    const todayCount = promoOrders.filter((o) => o.promoDate === today).length;
+    return promoStatusFromCounts(today, todayCount, totalCount);
+}
+
+function getDailyPromoStatusFromUser(userData = null) {
+    if (!userData || userData.promoTotalCount === undefined) return null;
+    const today = getVnDateString();
+    const totalCount = Number(userData.promoTotalCount) || 0;
+    const lastDate = userData.promoLastDate || '';
+    const todayCount = lastDate === today ? (Number(userData.promoTodayCount) || 0) : 0;
+    return promoStatusFromCounts(today, todayCount, totalCount);
+}
+
+/** UI: lấy max(đơn, user doc) để không hiển thị promo khi đã hết lượt thật. */
+function getDailyPromoStatus(orders = [], userData = null) {
+    const fromOrders = getDailyPromoStatusFromOrders(orders);
+    const fromUser = getDailyPromoStatusFromUser(userData);
+    if (!fromUser) return fromOrders;
+    const today = fromOrders.today;
+    const todayCount = Math.max(fromOrders.todayCount, fromUser.todayCount);
+    const totalCount = Math.max(fromOrders.totalCount, fromUser.totalCount);
+    return promoStatusFromCounts(today, todayCount, totalCount);
+}
+
+function resolvePromoCost(orders, baseCost, userData = null) {
+    const promo = getDailyPromoStatus(orders, userData);
+    if (!promo.canUsePromo) {
+        return { cost: baseCost, isPromo: false, remainingToday: 0, remainingTotal: promo.remainingTotal };
+    }
+    return {
+        cost: DAILY_PROMO_COST,
+        isPromo: true,
+        remainingToday: 1,
+        remainingTotal: promo.remainingTotal - 1
+    };
+}
+
+function modelForDailyPromoOrder() {
+    const base = localizedModel(DAILY_PROMO_MODEL_KEY) || MODELS.fast;
+    return {
+        ...base,
+        modelId: '124',
+        renderProvider: 'aidancing',
+        maxVideoSec: 20,
+        cost: DAILY_PROMO_COST,
+        dailyPromo: true,
+    };
+}
+
+/** Trong Firestore transaction — dùng user doc + cache đơn (transaction.get chỉ nhận doc ref, không query). */
+function readPromoCountsInTransaction(_transaction, uid, userData) {
+    const today = getVnDateString();
+    let totalCount = Number(userData.promoTotalCount);
+    let todayCount = 0;
+    let bootstrapped = false;
+
+    if (!Number.isFinite(totalCount)) {
+        const cached = (FB_CACHE.myOrders || []).filter((o) => o.userId === uid);
+        const promoOrders = cached.filter((o) => o.dailyPromo === true);
+        totalCount = promoOrders.length;
+        todayCount = promoOrders.filter((o) => o.promoDate === today).length;
+        bootstrapped = true;
+    } else {
+        const lastDate = userData.promoLastDate || '';
+        todayCount = lastDate === today ? (Number(userData.promoTodayCount) || 0) : 0;
+    }
+    return { today, totalCount, todayCount, bootstrapped };
+}
+
+function applyPromoUserDocUpdate(transaction, userRef, promoCounts, isDailyPromo, userData) {
+    const { serverTimestamp } = window.firebase;
+    const patch = { updatedAt: serverTimestamp() };
+    if (isDailyPromo) {
+        patch.promoTotalCount = promoCounts.totalCount + 1;
+        patch.promoLastDate = promoCounts.today;
+        patch.promoTodayCount = promoCounts.todayCount + 1;
+    } else if (promoCounts.bootstrapped && userData.promoTotalCount === undefined) {
+        patch.promoTotalCount = promoCounts.totalCount;
+        patch.promoLastDate = promoCounts.todayCount > 0 ? promoCounts.today : '';
+        patch.promoTodayCount = promoCounts.todayCount;
+    }
+    if (Object.keys(patch).length > 1) {
+        transaction.update(userRef, patch);
+    }
+}
 let initialCoinsBeforeTopup = 0; // Để theo dõi số dư trước khi nạp
+let starterTopupUsed = false; // Đã nạp gói starter_v2 (40k) — ẩn gói sau lần đầu
+let initialAuthSettled = false;
+
+function isStarterTopupRecord(data) {
+    if (!data) return false;
+    if (data.packageId === 'starter_v2') return true;
+    if (data.amount === 40000 && data.coins === 20) return true;
+    if (data.amount === 10000 && data.coins === 10) return true; // gói cũ
+    return false;
+}
+
+async function refreshStarterTopupEligibility() {
+    if (!currentUser) {
+        starterTopupUsed = false;
+        return;
+    }
+    try {
+        const { db, collection, query, where, getDocs } = window.firebase;
+        const q = query(
+            collection(db, 'topups'),
+            where('userId', '==', currentUser.uid),
+            where('status', '==', 'completed')
+        );
+        const snap = await getDocs(q);
+        starterTopupUsed = snap.docs.some((doc) => isStarterTopupRecord(doc.data()));
+    } catch (e) {
+        console.warn('[Pricing] starter eligibility check failed:', e);
+    }
+}
+
+function getVisibleCoinPackages() {
+    let list = COIN_PACKAGES.filter((pkg) => {
+        if (pkg.oneTime && pkg.id === 'starter_v2' && starterTopupUsed) return false;
+        return true;
+    });
+    list = list.filter(p => p.id !== 'hocvien_package');
+    const hocvien = COIN_PACKAGES.find(p => p.id === 'hocvien_package');
+    if (hocvien) {
+        list.splice(1, 0, hocvien);
+    }
+    return list;
+}
 let referralEarningsUnsubscribe = null; // Cleanup handle for referralEarnings onSnapshot (legacy - giờ dùng FB_LISTENERS)
 let referralCurrentCode = null; // User's referral code, populated when opening referral page
 const SUPER_ADMIN_EMAILS = ["traderfinn0312@gmail.com", "dinhhoangvan.hh@gmail.com"]; // Danh sách admin khởi tạo
+
+function isAnonymousUser(user) {
+    return !!user?.isAnonymous;
+}
+
+function userEmailSafe(user) {
+    return user?.email || '';
+}
+
+function userDisplayLabel(user, profileData) {
+    if (profileData?.displayName) return profileData.displayName;
+    if (user?.displayName) return user.displayName;
+    const email = userEmailSafe(user);
+    if (email) return email.split('@')[0];
+    const shortId = (user?.uid || '').slice(0, 6);
+    return t('navbar.guest_display', { id: shortId || '------' });
+}
+
+function userEmailLabel(user, profileData) {
+    const email = profileData?.email || userEmailSafe(user);
+    if (email) return email;
+    return t('navbar.guest_account');
+}
+
+function topupGuestDisplayLabel(topup) {
+    const rawName = String(topup?.userName || '').trim();
+    if (rawName && rawName !== 'N/A' && rawName !== 'Khách') {
+        return rawName;
+    }
+    const uid = String(topup?.userId || '').trim();
+    if (uid) {
+        return t('navbar.guest_display', { id: uid.slice(0, 6) });
+    }
+    return t('common.guest');
+}
+
+function formatAdminTopupCustomerCell(topup) {
+    const email = String(topup?.userEmail || '').trim();
+    const guestLabel = topupGuestDisplayLabel(topup);
+
+    if (email) {
+        return {
+            title: escapeHTML(guestLabel),
+            subline: `<small style="opacity:0.6;">${escapeHTML(email)}</small>`
+        };
+    }
+    return {
+        title: escapeHTML(guestLabel),
+        subline: `<small style="opacity:0.45;">${escapeHTML(t('navbar.guest_account'))}</small>`
+    };
+}
+
+function updateLogoutMenuItem(user) {
+    const logoutItem = document.getElementById('user-logout-item');
+    if (!logoutItem) return;
+    logoutItem.style.display = isAnonymousUser(user) ? 'none' : 'flex';
+}
 
 // =====================================================================
 // FIREBASE LISTENER REGISTRY (chống leak listener gây tốn reads)
@@ -499,28 +510,38 @@ function fbHas(key) {
     return typeof FB_LISTENERS[key] === 'function';
 }
 // --- i18n Logic ---
-// VN (geo) → tiếng Việt; nước ngoài → English. Fallback: trình duyệt → en.
+// Priority: manual choice in localStorage > geo (VN=vi, else=en) > browser language.
+const LANG_STORAGE_KEY = 'app_lang';
+
+function detectLangFromBrowser() {
+    const langs = navigator.languages?.length ? navigator.languages : [navigator.language || ''];
+    for (const l of langs) {
+        if (String(l).toLowerCase().startsWith('vi')) return 'vi';
+    }
+    return 'en';
+}
+
 async function resolveInitialLanguage() {
+    const saved = localStorage.getItem(LANG_STORAGE_KEY);
+    if (supportedLangs().includes(saved)) return saved;
+
     try {
         const res = await fetch('/api/geo', { cache: 'no-store' });
         if (res.ok) {
             const data = await res.json();
-            if (String(data.country || '').toUpperCase() === 'VN') return 'vi';
-            return 'en';
+            const lang = data.lang || window.LANG_CONFIG?.langFromCountry?.(data.country) || 'en';
+            if (supportedLangs().includes(lang)) return lang;
         }
     } catch (e) {
         console.warn('[i18n] Geo detection failed, using browser fallback:', e.message);
     }
+
     return detectLangFromBrowser();
 }
 
 // vi/en only. Default: en (non-VN).
 let currentLang = 'en';
 window.currentLang = currentLang;
-
-function localeTag() {
-    return currentLang === 'vi' ? 'vi-VN' : 'en-US';
-}
 
 function logFirebaseEvent(name, params = {}) {
     if (window.firebase && window.firebase.analytics && window.firebase.logEvent) {
@@ -716,21 +737,10 @@ function clearPendingReferralCode() {
     try { localStorage.removeItem(REFERRAL_STORAGE_KEY); } catch (e) { }
 }
 
-function versionParts(v) {
-    return String(v ?? 0).split('.').map((p) => parseInt(p, 10) || 0);
-}
-
 function isClientOlderThan(clientVer, minVer) {
-    const a = versionParts(clientVer);
-    const b = versionParts(minVer);
-    const n = Math.max(a.length, b.length);
-    for (let i = 0; i < n; i++) {
-        const x = a[i] || 0;
-        const y = b[i] || 0;
-        if (x < y) return true;
-        if (x > y) return false;
-    }
-    return false;
+    const a = Number(clientVer) || 0;
+    const b = Number(minVer) || 0;
+    return a < b;
 }
 
 async function ensureClientVersionGate() {
@@ -775,6 +785,8 @@ export async function initAppLogic() {
     if (!['vi', 'en'].includes(currentLang)) currentLang = 'en';
     window.currentLang = currentLang;
 
+    await ensureClientVersionGate();
+
     // Global Error Handler for debugging
     window.onerror = function (msg, url, lineNo, columnNo, error) {
         const errText = error?.message || error?.stack || String(msg || 'unknown');
@@ -790,23 +802,61 @@ export async function initAppLogic() {
     // Capture ?ref=XXX before auth state initialises so it survives signup
     captureReferralFromURL();
 
-    await ensureClientVersionGate();
-
     // (Intro modal removed; login-required uses auth-modal)
 
-    const { auth, onAuthStateChanged } = window.firebase;
+    if (!window.firebase?.auth || !window.firebase?.onAuthStateChanged) {
+        console.error('[Auth] Firebase chưa sẵn sàng');
+        hideAuthLoading();
+        return;
+    }
 
-    onAuthStateChanged(auth, (user) => {
+    const { auth, onAuthStateChanged, signOut } = window.firebase;
+
+    showAuthLoading();
+
+    onAuthStateChanged(auth, async (user) => {
         try {
-            if (user) {
-                currentUser = user;
-                handleUserLoggedIn(user);
-            } else {
+            if (requiresExternalBrowser()) {
+                hideAuthLoading();
+                if (user) {
+                    try {
+                        await signOut(auth);
+                    } catch (e) {
+                        console.warn('[Auth] signOut in external-browser gate:', e);
+                    }
+                }
                 currentUser = null;
                 handleUserLoggedOut();
+                return;
             }
+
+            if (user && isAnonymousUser(user)) {
+                try {
+                    await signOut(auth);
+                } catch (e) {
+                    console.warn('[Auth] signOut anonymous:', e);
+                }
+                return;
+            }
+
+            if (user) {
+                currentUser = user;
+                hideAuthLoading();
+                try {
+                    await handleUserLoggedIn(user);
+                } catch (e) {
+                    console.error("Auth profile error:", e);
+                    showToast(t('common.error_auth', { msg: e.message || e.code || 'Firestore' }));
+                }
+                return;
+            }
+
+            currentUser = null;
+            hideAuthLoading();
+            handleUserLoggedOut(false);
         } catch (e) {
             console.error("Auth Change Error:", e);
+            hideAuthLoading();
             showToast(t('common.error_auth', { msg: e.message }));
         }
     });
@@ -817,15 +867,17 @@ export async function initAppLogic() {
     renderServicePackages();
     initPremiumEffects();
     setupEventListeners();
-    selectDefaultModel(DEFAULT_MODEL_KEY);
     syncVideos();
+    selectDefaultModel(DEFAULT_MODEL_KEY);
     // Initial UI update for first order offer
     updateFirstOrderUI();
     // Check maintenance status
     checkMaintenance();
     // Detect In-App Browsers
     detectInAppBrowser();
-    setupSupportFabs();
+
+    setupLogoAdminUnlock();
+    setupTelegramFab();
 
     // Call again after dynamic parts are rendered
     applyTranslations();
@@ -833,19 +885,78 @@ export async function initAppLogic() {
 
 const TELEGRAM_SUPPORT_URL = 'https://t.me/motionaistudio';
 const ZALO_SUPPORT_URL = 'https://zalo.me/0965951536';
+const LOGO_ADMIN_TAPS_REQUIRED = 5;
+const LOGO_ADMIN_TAP_WINDOW_MS = 2500;
+const LOGO_SINGLE_NAV_DELAY_MS = 450;
 
-function setupSupportFabs() {
+function setupTelegramFab() {
     const fab = document.getElementById('telegram-fab');
     if (fab) fab.href = TELEGRAM_SUPPORT_URL;
     const zaloFab = document.getElementById('zalo-fab');
     if (zaloFab) zaloFab.href = ZALO_SUPPORT_URL;
 }
 
-// --- Browser Detection ---
+function setupLogoAdminUnlock() {
+    const logo = document.getElementById('site-logo');
+    if (!logo || logo.dataset.adminUnlockBound === '1') return;
+    logo.dataset.adminUnlockBound = '1';
+
+    let tapCount = 0;
+    let resetTimer = null;
+    let singleNavTimer = null;
+
+    const clearTimers = () => {
+        if (resetTimer) {
+            clearTimeout(resetTimer);
+            resetTimer = null;
+        }
+        if (singleNavTimer) {
+            clearTimeout(singleNavTimer);
+            singleNavTimer = null;
+        }
+    };
+
+    logo.addEventListener('click', (e) => {
+        e.preventDefault();
+        tapCount++;
+
+        if (singleNavTimer) {
+            clearTimeout(singleNavTimer);
+            singleNavTimer = null;
+        }
+
+        if (resetTimer) clearTimeout(resetTimer);
+        resetTimer = setTimeout(() => {
+            tapCount = 0;
+            resetTimer = null;
+        }, LOGO_ADMIN_TAP_WINDOW_MS);
+
+        if (tapCount >= LOGO_ADMIN_TAPS_REQUIRED) {
+            tapCount = 0;
+            clearTimers();
+            showAdminAuthModal();
+            return;
+        }
+
+        singleNavTimer = setTimeout(() => {
+            if (tapCount === 1) {
+                window.navTo('user-dashboard');
+            }
+            tapCount = 0;
+            singleNavTimer = null;
+        }, LOGO_SINGLE_NAV_DELAY_MS);
+    });
+}
+
+function showAdminAuthModal() {
+    promptGoogleSignIn();
+}
+
 function requiresExternalBrowser() {
     return !isStandaloneBrowser();
 }
 
+// --- In-app browser (TikTok / Facebook / …) ---
 function isInAppBrowser() {
     const ua = navigator.userAgent || navigator.vendor || window.opera || '';
     return /TikTok|FBAV|FBAN|Instagram|Messenger|Line\/|WhatsApp|Telegram|MicroMessenger|Twitter|LinkedInApp/i.test(ua);
@@ -858,6 +969,22 @@ function isStandaloneBrowser() {
     return (isChrome || isSafari) && !isInAppBrowser();
 }
 
+function showAuthLoading() {
+    if (initialAuthSettled) return;
+    const overlay = document.getElementById('auth-loading-overlay');
+    if (!overlay) return;
+    overlay.hidden = false;
+    document.body.classList.add('auth-loading-active');
+}
+
+function hideAuthLoading() {
+    if (initialAuthSettled) return;
+    initialAuthSettled = true;
+    const overlay = document.getElementById('auth-loading-overlay');
+    if (overlay) overlay.hidden = true;
+    document.body.classList.remove('auth-loading-active');
+}
+
 function showExternalBrowserRequiredModal() {
     if (!requiresExternalBrowser()) return;
     const authModal = document.getElementById('auth-modal');
@@ -866,6 +993,25 @@ function showExternalBrowserRequiredModal() {
     if (!modal) return;
     modal.hidden = false;
     document.body.classList.add('inapp-modal-open');
+    applyTranslations();
+}
+
+function promptGoogleSignIn() {
+    if (requiresExternalBrowser()) {
+        showExternalBrowserRequiredModal();
+        return;
+    }
+    const authModal = document.getElementById('auth-modal');
+    if (!authModal) return;
+    const v = document.getElementById('auth-banner-video');
+    if (v && !v.src) {
+        v.src = 'https://pub-2b53cd37b4a44642afdbb8bb470bde66.r2.dev/banner.mp4';
+    }
+    const googleBtn = document.getElementById('google-login-btn');
+    const inAppNote = document.getElementById('inapp-auth-note');
+    if (googleBtn) googleBtn.style.display = '';
+    if (inAppNote) inAppNote.style.display = 'none';
+    authModal.style.display = 'flex';
     applyTranslations();
 }
 
@@ -957,28 +1103,10 @@ window.openExternalBrowser = async (targetUrl) => {
     showToast(t('modals.inapp_open_attempt'));
 };
 
+// --- Browser Detection ---
 function detectInAppBrowser() {
     if (requiresExternalBrowser()) {
         showExternalBrowserRequiredModal();
-        
-        // Cập nhật giao diện phụ nếu có
-        const googleBtn = document.getElementById('google-login-btn');
-        const googleDivider = document.querySelector('.google-auth-divider');
-        const inAppNote = document.getElementById('inapp-auth-note');
-        const authEmailBtn = document.getElementById('auth-email-btn');
-        const authModalDesc = document.getElementById('auth-modal-desc');
-
-        if (googleBtn) googleBtn.style.display = 'none';
-        if (googleDivider) googleDivider.style.display = 'none';
-        if (inAppNote) inAppNote.style.display = 'block';
-        if (authEmailBtn) {
-            authEmailBtn.setAttribute('data-i18n', 'modals.auth_btn_register');
-            authEmailBtn.innerText = t('modals.auth_btn_register');
-        }
-        if (authModalDesc) {
-            authModalDesc.setAttribute('data-i18n', 'modals.auth_desc_register');
-            authModalDesc.innerHTML = t('modals.auth_desc_register');
-        }
     }
 }
 
@@ -1155,7 +1283,7 @@ window.renderShowcase = async (page) => {
     if (!gallery) return;
 
     if (!_showcaseShuffled.length) {
-        gallery.innerHTML = `<div style="text-align:center;padding:2rem;color:var(--text-muted)">${t('common.loading')}</div>`;
+        gallery.innerHTML = '<div style="text-align:center;padding:2rem;color:var(--text-muted)">Loading...</div>';
         await fetchTemplates();
         if (!TREND_VIDEOS.length) { gallery.innerHTML = ''; return; }
         _showcaseShuffled = [...TREND_VIDEOS].sort(() => Math.random() - 0.5);
@@ -1261,6 +1389,11 @@ window.useTrendShortcut = (id, url) => {
 };
 
 async function login() {
+    if (requiresExternalBrowser()) {
+        showExternalBrowserRequiredModal();
+        showToast(t('modals.inapp_browser_sub'));
+        return;
+    }
     const { auth, GoogleAuthProvider, signInWithPopup } = window.firebase;
     const provider = new GoogleAuthProvider();
     try {
@@ -1290,20 +1423,31 @@ async function logout() {
 async function handleUserLoggedIn(user) {
     const { db, doc, getDoc, setDoc, onSnapshot, collection, query, where } = window.firebase;
 
+    const userRefEarly = doc(db, 'users', user.uid);
+    const userSnapEarly = await getDoc(userRefEarly);
+    const profileEarly = userSnapEarly.exists() ? userSnapEarly.data() : null;
+
     // Ẩn Auth Modal bắt buộc
     const authModal = document.getElementById('auth-modal');
     if (authModal) authModal.style.display = 'none';
 
-    // Hiển thị Profile Menu thay vì ghi đè HTML
-    document.getElementById('login-btn').style.display = 'none';
-    document.getElementById('user-profile-menu').style.display = 'block';
+    const loginBtn = document.getElementById('login-btn');
+    const loginSection = document.getElementById('login-section');
+    if (loginBtn) loginBtn.style.display = 'none';
+    if (loginSection) loginSection.style.display = 'none';
+
+    const profileMenu = document.getElementById('user-profile-menu');
+    if (profileMenu) profileMenu.style.display = 'block';
     const navbarCoin = document.getElementById('navbar-coin-widget');
     if (navbarCoin) navbarCoin.style.display = 'flex';
     const navbarApi = document.getElementById('navbar-api-btn');
     if (navbarApi) navbarApi.style.display = 'flex';
-    if (typeof updateBatchChannelNewBadge === 'function') updateBatchChannelNewBadge();
-    document.getElementById('dropdown-user-name').innerText = user.displayName || user.email.split('@')[0];
-    document.getElementById('dropdown-user-email').innerText = user.email;
+
+    const dropdownName = document.getElementById('dropdown-user-name');
+    const dropdownEmail = document.getElementById('dropdown-user-email');
+    if (dropdownName) dropdownName.innerText = userDisplayLabel(user, profileEarly);
+    if (dropdownEmail) dropdownEmail.innerText = userEmailLabel(user, profileEarly);
+    updateLogoutMenuItem(user);
 
     // Avatar for user menu button
     const avatarImg = document.getElementById('user-menu-avatar');
@@ -1349,14 +1493,13 @@ async function handleUserLoggedIn(user) {
         console.log("🎯 Firebase Analytics: User identified");
     }
 
-    const userRef = doc(db, "users", user.uid);
-    const userSnap = await getDoc(userRef);
+    const userRef = userRefEarly;
+    const userSnap = userSnapEarly;
 
-    // Bootstrap Super Admin from hardcoded list to Database
-    const isBootstrapSuperAdmin = SUPER_ADMIN_EMAILS.includes(user.email);
+    const isBootstrapSuperAdmin = !!userEmailSafe(user) && SUPER_ADMIN_EMAILS.includes(user.email);
 
     if (!userSnap.exists()) {
-        const defaultName = user.displayName || user.email.split('@')[0];
+        const defaultName = userDisplayLabel(user);
         const defaultPhoto = user.photoURL || "https://www.gravatar.com/avatar/00000000000000000000000000000000?d=mp&f=y";
 
         // Resolve pending referral code (if any) before creating user doc.
@@ -1385,12 +1528,11 @@ async function handleUserLoggedIn(user) {
         const newUserPayload = {
             uid: user.uid,
             displayName: defaultName,
-            email: user.email,
+            email: userEmailSafe(user),
             photoURL: defaultPhoto,
+            authProvider: isAnonymousUser(user) ? 'anonymous' : (user.providerData?.[0]?.providerId || 'google.com'),
             coins: 0,
-            promo1CoinCount: 0,
-            promo1CoinLastDay: '',
-            role: isBootstrapSuperAdmin ? 'super-admin' : 'user', // Tự động gán role vào DB
+            role: isBootstrapSuperAdmin ? 'super-admin' : 'user',
             createdAt: window.firebase.serverTimestamp(),
             updatedAt: window.firebase.serverTimestamp()
         };
@@ -1402,7 +1544,7 @@ async function handleUserLoggedIn(user) {
             value: 0,
             currency: 'VND',
             status: true,
-            content_name: user.providerData?.[0]?.providerId || 'signup'
+            content_name: isAnonymousUser(user) ? 'anonymous' : (user.providerData?.[0]?.providerId || 'signup')
         });
 
         // Clear the pending ref code after a successful signup attempt.
@@ -1423,13 +1565,8 @@ async function handleUserLoggedIn(user) {
     fbSub('userProfile', onSnapshot(userRef, (snapshot) => {
         if (snapshot.exists()) {
             const data = snapshot.data();
-            window.__currentUserData = data;
+            FB_CACHE.userProfile = data;
             const currentCoins = data.coins || 0;
-            if (FB_CACHE.myOrders) {
-                syncPromo1CoinState(FB_CACHE.myOrders, data);
-                ensureUserPromoFieldsSynced(FB_CACHE.myOrders, data);
-                updateFirstOrderUI();
-            }
 
             // [TỐI ƯU] KHÔNG còn log 'login' event ở đây nữa.
             // Listener này fire mỗi khi user.coins / role / v.v. thay đổi (nhiều lần),
@@ -1479,7 +1616,7 @@ async function handleUserLoggedIn(user) {
                     num_items: 1
                 });
 
-                sendTelegramMessage(`💰 <b>NẠP COIN THÀNH CÔNG!</b>\n👤 Khách: ${escapeHTML(data.displayName)}\n📧 Email: ${escapeHTML(data.email)}\n✨ Đã cộng: +${addedCoins} Coin\n💰 Số dư mới: ${currentCoins} Coin`);
+                refreshStarterTopupEligibility().then(() => renderPricing());
             }
 
             document.querySelectorAll('.coin-balance-text').forEach(el => el.innerText = currentCoins);
@@ -1499,6 +1636,8 @@ async function handleUserLoggedIn(user) {
             window.__isAdmin = isAdmin;
             window.__isSuperAdmin = isSuperAdmin;
 
+            updateBatchChannelNewBadge();
+
             if (isAdmin) {
                 const adminProfileItem = document.getElementById('admin-dropdown-item-profile');
                 if (adminProfileItem) adminProfileItem.style.display = 'flex';
@@ -1506,8 +1645,6 @@ async function handleUserLoggedIn(user) {
                 if (adminDivider) adminDivider.style.display = 'block';
 
                 if (isSuperAdmin) {
-                    const purgeBtn = document.getElementById('btn-purge-inactive-users');
-                    if (purgeBtn) purgeBtn.style.display = 'inline-flex';
                     const tabUsersEl = document.getElementById('tab-users');
                     if (tabUsersEl) tabUsersEl.style.display = 'block';
                 }
@@ -1522,8 +1659,6 @@ async function handleUserLoggedIn(user) {
                     loadAdminPanel();
                 }
             } else {
-                const purgeBtn = document.getElementById('btn-purge-inactive-users');
-                if (purgeBtn) purgeBtn.style.display = 'none';
                 const adminProfileItem = document.getElementById('admin-dropdown-item-profile');
                 if (adminProfileItem) adminProfileItem.style.display = 'none';
                 const adminDivider = document.getElementById('admin-dropdown-divider');
@@ -1542,6 +1677,9 @@ async function handleUserLoggedIn(user) {
     }));
 
 
+
+    await refreshStarterTopupEligibility();
+    renderPricing();
 
     loadMyOrders();
     loadMyTopups();
@@ -1580,16 +1718,22 @@ function navigateFromURLParam() {
 }
 
 function handleUserLoggedOut() {
-    // Show login-required popup with banner video
-    const authModal = document.getElementById('auth-modal');
-    if (authModal) authModal.style.display = 'flex';
-    const v = document.getElementById('auth-banner-video');
-    if (v && !v.src) {
-        v.src = 'https://pub-2b53cd37b4a44642afdbb8bb470bde66.r2.dev/banner.mp4';
+    if (requiresExternalBrowser()) {
+        showExternalBrowserRequiredModal();
+        const loginBtn = document.getElementById('login-btn');
+        const loginSection = document.getElementById('login-section');
+        if (loginBtn) loginBtn.style.display = 'none';
+        if (loginSection) loginSection.style.display = 'none';
+    } else {
+        promptGoogleSignIn();
+        const loginBtn = document.getElementById('login-btn');
+        const loginSection = document.getElementById('login-section');
+        if (loginBtn) loginBtn.style.display = 'flex';
+        if (loginSection) loginSection.style.display = '';
     }
 
-    document.getElementById('login-btn').style.display = 'flex';
-    document.getElementById('user-profile-menu').style.display = 'none';
+    const profileMenu = document.getElementById('user-profile-menu');
+    if (profileMenu) profileMenu.style.display = 'none';
     const navbarCoin = document.getElementById('navbar-coin-widget');
     if (navbarCoin) navbarCoin.style.display = 'none';
     const navbarApi = document.getElementById('navbar-api-btn');
@@ -1605,10 +1749,10 @@ function handleUserLoggedOut() {
     if (topupPage) topupPage.style.display = 'none';
     const referralPage = document.getElementById('referral-page');
     if (referralPage) referralPage.style.display = 'none';
-    const purgeBtnLogout = document.getElementById('btn-purge-inactive-users');
-    if (purgeBtnLogout) purgeBtnLogout.style.display = 'none';
     const adminProfileItem = document.getElementById('admin-dropdown-item-profile');
     if (adminProfileItem) adminProfileItem.style.display = 'none';
+    const batchChannelItem = document.getElementById('user-dropdown-item-batch-channel');
+    if (batchChannelItem) batchChannelItem.style.display = 'none';
     const adminDivider = document.getElementById('admin-dropdown-divider');
     if (adminDivider) adminDivider.style.display = 'none';
 
@@ -1625,16 +1769,14 @@ function handleUserLoggedOut() {
     adminSubscribedOrderStatus = null;
     adminSubscribedTopupStatus = null;
     Object.keys(FB_CACHE).forEach(k => { delete FB_CACHE[k]; });
-    if (typeof resetBatchChannelForm === 'function') {
-        _batchChannelPickerOrders = [];
-        resetBatchChannelForm({ keepDefaults: true });
-        closeModal('batch-channel-modal');
-    }
+    _batchChannelPickerOrders = [];
+    resetBatchChannelForm({ keepDefaults: true });
+    closeModal('batch-channel-modal');
 
-    // Legacy var
+    // Legacy var (giờ đã unsub trong fbUnsubAll, để null cho an toàn)
     referralEarningsUnsubscribe = null;
 
-    isFirstTimeUser = false;
+    dailyPromoRemaining = 0;
     updateFirstOrderUI();
 
     // Home = My videos (dashboard sẽ hiện placeholder login-required)
@@ -1645,7 +1787,7 @@ function showDashboard() {
     hideAllPages();
     document.getElementById('user-dashboard').style.display = 'block';
     window.scrollTo(0, 0);
-    if (typeof updateBatchChannelNewBadge === 'function') updateBatchChannelNewBadge();
+    updateBatchChannelNewBadge();
 }
 
 function showTopupHistory() {
@@ -1850,7 +1992,6 @@ function renderPricing() {
     const filteredPackages = getVisibleCoinPackages();
 
     const vietqrPayIcon = `<svg class="pricing-pay-icon pricing-pay-icon--vietqr" viewBox="0 0 24 24" aria-hidden="true"><rect width="24" height="24" rx="3" fill="#DA251D"/><path fill="#FFCD00" d="M12 5.4l1.55 3.14 3.46.5-2.5 2.44.59 3.45L12 14.7l-3.1 1.63.59-3.45-2.5-2.44 3.46-.5L12 5.4z"/></svg>`;
-    const intlPayIcon = `<svg class="pricing-pay-icon pricing-pay-icon--intl" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle cx="12" cy="12" r="8.5" stroke="currentColor" stroke-width="1.5"/><path d="M4 12h16M12 4.2c2.2 2.8 2.2 12.8 0 15.6M12 4.2c-2.2 2.8-2.2 12.8 0 15.6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>`;
     const coinIcon = `<svg class="coin-icon-svg" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M12 2L20.66 7V17L12 22L3.34 17V7L12 2Z" fill="url(#coin-gradient)" fill-opacity="0.2" stroke="url(#coin-gradient)" stroke-width="2"/><path d="M12 6L17.2 9V15L12 18L6.8 15V9L12 6Z" fill="url(#coin-gradient)"/><path d="M12 9V15M9 12H15" stroke="white" stroke-width="1.5" stroke-linecap="round"/></svg>`;
 
     const buildCoinCard = (pkg, { showFeatures = false } = {}) => {
@@ -1886,7 +2027,7 @@ function renderPricing() {
                 ${featuresList}
 
                 <div class="pricing-pay-actions" style="display: flex; gap: 8px; width: 100%; margin-top: 10px;">
-                    <button type="button" class="pricing-pay-btn pricing-pay-btn--vietqr" onclick="window.selectTopup('${pkg.id}', 'vietqr')" style="flex: 1.3; padding: 10px 8px; font-size: 0.78rem; border-radius: 8px; height: 38px; display: flex; align-items: center; justify-content: center; gap: 4px;">
+                    <button type="button" class="pricing-pay-btn pricing-pay-btn--vietqr" onclick="window.selectTopup('${pkg.id}')" style="flex: 1.3; padding: 10px 8px; font-size: 0.78rem; border-radius: 8px; height: 38px; display: flex; align-items: center; justify-content: center; gap: 4px;">
                         ${vietqrPayIcon}
                         <span class="pricing-pay-label" style="font-size: 0.75rem; white-space: nowrap;">${t('pricing.pay_vietqr')}</span>
                     </button>
@@ -1906,7 +2047,8 @@ function renderPricing() {
                 <li><span class="check-icon">✓</span> ${t('pricing.no_expiry')}</li>
             </ul>` : '';
         return `
-        <div class="price-card price-card--coin">
+        <div class="price-card price-card--coin${pkg.featured ? ' featured' : ''}">
+            ${pkg.featured ? `<div class="featured-badge">🔥 ${t('pricing.featured_hot')}</div>` : ''}
             <div class="price-card-note">${showNote ? noteText : '&#8203;'}</div>
             <div class="coin-amount-display">
                 ${coinIcon}
@@ -1916,11 +2058,7 @@ function renderPricing() {
             <div class="price-value">${pkg.price}</div>
             ${featuresHtml}
             <div class="pricing-pay-actions">
-                <button type="button" class="pricing-pay-btn pricing-pay-btn--intl" onclick="window.selectTopup('${pkg.id}', 'intl')">
-                    ${intlPayIcon}
-                    <span class="pricing-pay-label pricing-pay-label--single">${t('pricing.pay_intl')}</span>
-                </button>
-                <button type="button" class="pricing-pay-btn pricing-pay-btn--vietqr" onclick="window.selectTopup('${pkg.id}', 'vietqr')">
+                <button type="button" class="pricing-pay-btn pricing-pay-btn--vietqr" onclick="window.selectTopup('${pkg.id}')">
                     ${vietqrPayIcon}
                     <span class="pricing-pay-label pricing-pay-label--single">${t('pricing.pay_vietqr')}</span>
                 </button>
@@ -1968,7 +2106,6 @@ function renderServicePackages() {
 window.switchVideoSource = (type) => {
     const uploadBtn = document.getElementById('tab-upload');
     const tiktokBtn = document.getElementById('tab-tiktok');
-    const libraryBtn = document.getElementById('tab-library');
     const uploadSection = document.getElementById('video-upload-section');
     const tiktokSection = document.getElementById('video-tiktok-section');
     const librarySection = document.getElementById('video-library-section');
@@ -1987,8 +2124,7 @@ window.switchVideoSource = (type) => {
         if (existing?.type?.startsWith('video/')) {
             renderVideoFilePreview('preview-video-container', existing, {
                 inputId: 'file-video',
-                changeKey: 'modals.video_change',
-                maxDurationSec: getSelectedModelMaxVideoSec()
+                changeKey: 'modals.video_change'
             });
         }
     } else if (type === 'tiktok') {
@@ -1996,11 +2132,18 @@ window.switchVideoSource = (type) => {
         if (tiktokSection) tiktokSection.style.display = 'block';
         window.currentVideoSource = 'upload';
     } else if (type === 'library') {
-        libraryBtn?.classList.add('active');
         if (librarySection) {
             librarySection.style.display = 'block';
             window.currentVideoSource = 'library';
             renderTemplates();
+            const tplUrl = document.getElementById('selected-template-url')?.value?.trim();
+            if (tplUrl) {
+                const trend = TREND_VIDEOS.find((v) => v.url === tplUrl);
+                renderVideoUrlPreview('preview-library-video-container', tplUrl, {
+                    label: trend ? trendTitle(trend) : '',
+                    onChange: clearLibraryTemplateSelection
+                });
+            }
         }
     }
 };
@@ -2014,11 +2157,11 @@ window.renderTemplates = async (page) => {
     if (!grid) return;
 
     if (!_templatesFetched) {
-        grid.innerHTML = `<div style="text-align:center;padding:1rem;color:var(--text-muted)">${t('common.loading')}</div>`;
+        grid.innerHTML = '<div style="text-align:center;padding:1rem;color:var(--text-muted)">Loading...</div>';
         await fetchTemplates();
     }
     if (!TREND_VIDEOS.length) {
-        grid.innerHTML = `<div style="text-align:center;padding:1rem;color:var(--text-muted)">${t('showcase.no_templates')}</div>`;
+        grid.innerHTML = '<div style="text-align:center;padding:1rem;color:var(--text-muted)">No templates</div>';
         return;
     }
 
@@ -2110,8 +2253,27 @@ window.selectTemplate = (id, url) => {
     document.getElementById('selected-template-url').value = url;
     window.currentVideoSource = 'library';
     const trend = TREND_VIDEOS.find(t => t.id === id);
+    renderVideoUrlPreview('preview-library-video-container', url, {
+        label: trend ? trendTitle(trend) : '',
+        onChange: clearLibraryTemplateSelection
+    });
     showToast(t('modals.toast_trend_selected', { title: trend ? trendTitle(trend) : id }));
 };
+
+function clearLibraryTemplateSelection() {
+    const urlInput = document.getElementById('selected-template-url');
+    if (urlInput) urlInput.value = '';
+    document.querySelectorAll('.template-item').forEach(el => el.classList.remove('active'));
+    const container = document.getElementById('preview-library-video-container');
+    const label = document.getElementById('preview-library-label');
+    const zone = document.getElementById('library-preview-zone');
+    if (container) {
+        container.innerHTML = '';
+        syncUploadZonePreviewState(container);
+    }
+    if (label) label.textContent = '';
+    if (zone) zone.style.display = 'none';
+}
 
 window.currentVideoSource = 'upload';
 
@@ -2151,9 +2313,11 @@ window.openTopupModal = () => {
     window.openPricingModal();
 };
 
-window.openPricingModal = () => {
+window.openPricingModal = async () => {
     if (blockIfUpgradeMaintenance()) return;
-    if (!currentUser) return login();
+    if (!currentUser) return;
+    await refreshStarterTopupEligibility();
+    renderPricing();
     window.openModal('pricing-modal');
     
     // TikTok Pixel: ViewContent (Viewing Topup Packages)
@@ -2175,52 +2339,20 @@ window.openPricingModal = () => {
     logFirebaseEvent('view_item_list', { item_list_name: 'Topup Packages' });
 };
 
-window.selectTopup = async (id, method = 'vietqr') => {
+window.selectTopup = async (id) => {
     if (!currentUser) return login();
 
+    await refreshStarterTopupEligibility();
     selectedTopupPackage = COIN_PACKAGES.find(p => p.id === id);
-    selectedPaymentMethod = method === 'intl' ? 'intl' : 'vietqr';
-
-    _paypalLastPackageId = null;
-    const ppContainer = document.getElementById('paypal-button-container');
-    if (ppContainer) ppContainer.innerHTML = '';
-    setPaypalStatus('');
+    if (!selectedTopupPackage) return;
+    if (selectedTopupPackage.oneTime && starterTopupUsed) {
+        renderPricing();
+        return showToast(t('pricing.starter_already_used'));
+    }
 
     initialCoinsBeforeTopup = parseInt((document.getElementById('coin-balance') || document.querySelector('.coin-balance-text'))?.innerText) || 0;
 
     closeModal('pricing-modal');
-    showPaymentPanel(selectedPaymentMethod);
-
-    if (selectedPaymentMethod === 'intl') {
-        const intlValue = parseFloat(String(selectedTopupPackage.usdPrice || '0').replace(/[^0-9.]/g, '')) || 0;
-        if (typeof ttq !== 'undefined') {
-            ttq.track('InitiateCheckout', {
-                value: intlValue,
-                currency: 'USD',
-                content_id: selectedTopupPackage.id
-            });
-        }
-        trackMetaEvent('InitiateCheckout', {
-            value: intlValue,
-            currency: 'USD',
-            content_ids: [selectedTopupPackage.id],
-            content_name: selectedTopupPackage.name,
-            content_type: 'product',
-            num_items: 1
-        });
-        logFirebaseEvent('begin_checkout', {
-            value: parseFloat(String(selectedTopupPackage.usdPrice || '0').replace(/[^0-9.]/g, '')) || 0,
-            currency: 'USD',
-            items: [{ item_id: selectedTopupPackage.id, item_name: selectedTopupPackage.name }]
-        });
-        renderIntlPackageInfo();
-        mountPaypalButtons(selectedTopupPackage).catch(err => {
-            console.error('[PayPal] mountPaypalButtons failed:', err);
-            setPaypalStatus(t('payment.paypal_load_error', { msg: err.message || err }), '#ff6b6b');
-        });
-        window.openModal('topup-modal');
-        return;
-    }
 
     if (typeof ttq !== 'undefined') {
         ttq.track('InitiateCheckout', {
@@ -2245,9 +2377,9 @@ window.selectTopup = async (id, method = 'vietqr') => {
         items: [{ item_id: selectedTopupPackage.id, item_name: selectedTopupPackage.name }]
     });
 
-    const { db, collection, addDoc, updateDoc, serverTimestamp, query, where, getDocs } = window.firebase;
+    const { db, collection, addDoc, serverTimestamp, query, where, getDocs, updateDoc, doc } = window.firebase;
     let transferContent = "";
-    const TOPUP_PREFIX = "MS"; // Prefix để Casso gateway route đúng web cũ (MotionAI Studio)
+    const TOPUP_PREFIX = "NH"; // Prefix để Casso gateway route đúng web (Nhay Cloud)
     
     try {
         const q = query(
@@ -2260,23 +2392,23 @@ window.selectTopup = async (id, method = 'vietqr') => {
         const snapshot = await getDocs(q);
         
         if (!snapshot.empty) {
-            const existingRef = snapshot.docs[0].ref;
-            const existingDoc = snapshot.docs[0].data();
-            const staleCoins = Number(existingDoc.coins) !== Number(selectedTopupPackage.coins);
-            const staleAmount = Number(existingDoc.amount) !== Number(selectedTopupPackage.amount);
-
-            if (staleCoins || staleAmount) {
+            const existingDocRef = snapshot.docs[0];
+            const existingDoc = existingDocRef.data();
+            transferContent = existingDoc.transferContent;
+            const guestLabel = userDisplayLabel(currentUser, window.__currentUserData);
+            const needsGuestLabel = !existingDoc.userName || existingDoc.userName === 'N/A' || existingDoc.userName === 'Khách';
+            if (needsGuestLabel) {
+                await updateDoc(existingDocRef.ref, {
+                    userName: guestLabel,
+                    userEmail: userEmailSafe(currentUser) || ''
+                });
+            }
+            // Nếu pending cũ thuộc format cũ (không có prefix) thì tạo mã mới để gateway route đúng.
+            if (!String(transferContent || '').toUpperCase().startsWith(TOPUP_PREFIX)) {
+                console.log("♻️ Pending topup cũ không đúng prefix, tạo mã mới:", transferContent);
                 const randomStr = Math.random().toString(36).substring(2, 6).toUpperCase();
                 transferContent = `${TOPUP_PREFIX}${selectedTopupPackage.coins}${randomStr}`;
-                await updateDoc(existingRef, {
-                    coins: selectedTopupPackage.coins,
-                    amount: selectedTopupPackage.amount,
-                    transferContent,
-                    updatedAt: serverTimestamp()
-                });
-                console.log("♻️ Cập nhật đơn pending (gói đổi coin/giá):", transferContent, selectedTopupPackage.coins, "coin");
             } else {
-                transferContent = existingDoc.transferContent;
                 console.log("♻️ Tái sử dụng đơn nạp tiền cũ đang chờ:", transferContent);
             }
         } else {
@@ -2285,8 +2417,9 @@ window.selectTopup = async (id, method = 'vietqr') => {
             
             await addDoc(collection(db, "topups"), {
                 userId: currentUser.uid,
-                userEmail: currentUser.email,
-                userName: currentUser.displayName,
+                userEmail: userEmailSafe(currentUser) || '',
+                userName: userDisplayLabel(currentUser, window.__currentUserData),
+                packageId: selectedTopupPackage.id,
                 packageName: selectedTopupPackage.name,
                 coins: selectedTopupPackage.coins,
                 amount: selectedTopupPackage.amount,
@@ -2316,7 +2449,7 @@ window.selectTopup = async (id, method = 'vietqr') => {
                 <div class="package-details">
                     <div class="pkg-label">${t('dashboard.col_package')}</div>
                     <div class="pkg-name">${packageDisplayName(selectedTopupPackage)}</div>
-                    <div class="pkg-coins">${t('payment.intl_coins', { coins: selectedTopupPackage.coins })}</div>
+                    <div class="pkg-coins">+${selectedTopupPackage.coins} ${t('common.coins_unit')}</div>
                 </div>
             </div>
             <div class="topup-info-price">
@@ -2326,7 +2459,12 @@ window.selectTopup = async (id, method = 'vietqr') => {
         </div>
     `;
 
-    document.getElementById('transfer-code').innerText = transferContent;
+    const transferCodeEl = document.getElementById('transfer-code');
+    if (transferCodeEl) transferCodeEl.innerText = transferContent;
+    const copyTransferBtn = document.getElementById('btn-copy-transfer-code');
+    if (copyTransferBtn) {
+        copyTransferBtn.onclick = () => window.copyToClipboard(transferContent);
+    }
 
     const qrImg = document.getElementById('qr-code-img');
     const qrLoader = document.getElementById('qr-loader');
@@ -2353,7 +2491,12 @@ window.selectTopup = async (id, method = 'vietqr') => {
 
 window.openOrderModal = () => {
     if (blockIfUpgradeMaintenance()) return;
-    selectDefaultModel(isFirstTimeUser && !isKalingSite() ? PROMO_1_COIN_MODEL_KEY : DEFAULT_MODEL_KEY);
+    const promo = getDailyPromoStatus(FB_CACHE.myOrders || [], FB_CACHE.userProfile);
+    if (promo.canUsePromo) {
+        selectDefaultModel(DAILY_PROMO_MODEL_KEY);
+    } else {
+        selectDefaultModel(DEFAULT_MODEL_KEY);
+    }
     updateFirstOrderUI();
     window.switchVideoSource('upload');
     window.openModal('order-modal');
@@ -2386,18 +2529,15 @@ window.openOrderModal = () => {
 
 function updateFirstOrderUI() {
     const costEl = document.getElementById('submit-cost');
-    const offerBanner = document.getElementById('first-order-offer-banner');
-    const guestOfferBar = document.getElementById('guest-offer-bar');
-    
-    const showOffer = (!currentUser || isFirstTimeUser) && !sessionStorage.getItem('offer_bar_dismissed');
-    console.log("🎁 updateFirstOrderUI: showOffer =", showOffer, "(isFirstTimeUser:", isFirstTimeUser, ")");
-    
-    if (offerBanner) offerBanner.style.display = isFirstTimeUser ? 'block' : 'none';
-    if (guestOfferBar) guestOfferBar.style.display = showOffer ? 'block' : 'none';
-    
+    const promo = getDailyPromoStatus(FB_CACHE.myOrders || [], FB_CACHE.userProfile);
+    dailyPromoRemaining = promo.remainingToday;
+
     const modelGroupEl = document.getElementById('model-selection-group');
-    if (modelGroupEl) {
-        modelGroupEl.style.display = (isKalingSite() || isFirstTimeUser) ? 'none' : 'block';
+    if (modelGroupEl) modelGroupEl.style.display = promo.canUsePromo ? 'none' : 'block';
+
+    if (promo.canUsePromo) {
+        const promoRadio = document.querySelector(`input[name="model-type"][value="${DAILY_PROMO_MODEL_KEY}"]`);
+        if (promoRadio) promoRadio.checked = true;
     }
 
     if (costEl) {
@@ -2405,44 +2545,38 @@ function updateFirstOrderUI() {
         const submitText = submitBtn ? submitBtn.querySelector('[data-i18n="hero.cta_create"]') : null;
         const summaryEl = document.getElementById('submit-summary-line');
         const modelKey = getSelectedModelKey();
+        const baseCost = localizedModel(modelKey)?.cost ?? MODELS.quality15.cost;
 
-        if (!isKalingSite() && promo1CoinStats.eligible) {
-            const promoRadio = document.querySelector(`input[name="model-type"][value="${PROMO_1_COIN_MODEL_KEY}"]`);
-            if (promoRadio) promoRadio.checked = true;
-            costEl.innerText = '1';
-            if (submitBtn) submitBtn.classList.add('btn-first-offer');
-            if (submitText) submitText.innerText = t('dashboard.first_order_cta_vnd');
-            if (summaryEl) {
-                summaryEl.innerText = t('modals.promo_1coin_model_desc');
-                summaryEl.style.color = '';
-            }
-        } else {
-            const lm = localizedModel(modelKey);
-            if (lm) {
-                costEl.innerText = String(lm.cost);
-            }
-            if (submitBtn) submitBtn.classList.remove('btn-first-offer');
-            if (submitText) submitText.innerText = t('hero.cta_create');
-            if (summaryEl) {
-                summaryEl.innerText = lm ? lm.time : t(`modals.model_${modelKey}_desc`);
-                summaryEl.style.color = '';
-            }
+        costEl.innerText = promo.canUsePromo ? String(DAILY_PROMO_COST) : String(baseCost);
+        if (submitBtn) submitBtn.classList.toggle('btn-first-offer', promo.canUsePromo);
+        if (submitText) {
+            submitText.innerText = promo.canUsePromo
+                ? t('dashboard.first_order_cta_vnd')
+                : t('hero.cta_create');
+        }
+        if (summaryEl) {
+            summaryEl.innerText = promo.canUsePromo
+                ? t('modals.promo_1coin_model_desc')
+                : t(`modals.model_${modelKey}_desc`);
+            summaryEl.style.color = '';
         }
     }
 }
 
-window.closeOfferBar = () => {
-    const bar = document.getElementById('guest-offer-bar');
-    if (bar) bar.style.display = 'none';
-    sessionStorage.setItem('offer_bar_dismissed', 'true');
-};
-
 window.niceConfirm = ({ title, message, icon, onConfirm }) => {
-    document.getElementById('confirm-title').innerText = title;
-    document.getElementById('confirm-msg').innerHTML = message; // Changed to innerHTML to support <br> and <i>
-    document.getElementById('confirm-icon').innerText = icon || '❓';
-
+    const titleEl = document.getElementById('confirm-title');
+    const msgEl = document.getElementById('confirm-msg');
+    const iconEl = document.getElementById('confirm-icon');
     const yesBtn = document.getElementById('confirm-yes-btn');
+    if (!titleEl || !msgEl || !iconEl || !yesBtn) {
+        if (onConfirm) onConfirm();
+        return;
+    }
+
+    titleEl.innerText = title;
+    msgEl.innerHTML = message;
+    iconEl.innerText = icon || '❓';
+
     const newBtn = yesBtn.cloneNode(true);
     yesBtn.parentNode.replaceChild(newBtn, yesBtn);
 
@@ -2472,14 +2606,19 @@ function appendPreviewChangeButton(container, inputId, labelKey) {
     container.appendChild(btn);
 }
 
+const MAX_REFERENCE_VIDEO_SEC = 30;
+const MAX_VIDEO_FILE_BYTES = 90 * 1024 * 1024;
 const TIKWM_API = 'https://www.tikwm.com/api/';
 let _ffmpegLoadPromise = null;
 
+function getSelectedModelMaxVideoSec() {
+    const m = MODELS[getSelectedModelKey()];
+    return m?.maxVideoSec ?? MAX_REFERENCE_VIDEO_SEC;
+}
+
 function getMaxVideoSecForOrder() {
-    if (isKalingSite()) return KALING_PRICING.maxVideoSec;
-    if (!isKalingSite() && promo1CoinStats.eligible) {
-        return MODELS.quality15.maxVideoSec;
-    }
+    const promo = getDailyPromoStatus(FB_CACHE.myOrders || [], FB_CACHE.userProfile);
+    if (promo.canUsePromo) return MODELS.quality15.maxVideoSec;
     return getSelectedModelMaxVideoSec();
 }
 
@@ -2536,6 +2675,7 @@ function referenceVideoNeedsTrim(refDurationSec, maxSec, { useLibrary = false } 
 function isMobileLikeClient() {
     const ua = navigator.userAgent || '';
     if (/Android|iPhone|iPad|iPod|Mobile/i.test(ua)) return true;
+    if (typeof isInAppBrowser === 'function' && isInAppBrowser()) return true;
     return navigator.maxTouchPoints > 1 && window.innerWidth <= 1024;
 }
 
@@ -2574,6 +2714,18 @@ function appendTrimHintBadge(container, maxSec) {
     badge.className = 'video-trim-hint-badge';
     badge.textContent = t('modals.video_will_trim_on_submit', { sec: maxSec });
     container.appendChild(badge);
+}
+
+async function getVideoDurationFromUrl(url) {
+    const video = document.createElement('video');
+    video.preload = 'metadata';
+    video.muted = true;
+    video.playsInline = true;
+    video.src = url;
+    return new Promise((resolve, reject) => {
+        video.onloadedmetadata = () => resolve(video.duration);
+        video.onerror = () => reject(new Error('metadata'));
+    });
 }
 
 function isTikTokPageUrl(raw) {
@@ -3144,6 +3296,70 @@ window.fetchTikTokVideo = async () => {
     }
 };
 
+function mountUrlVideoPreview(container, url, options = {}) {
+    container.innerHTML = '';
+    const previewVideo = document.createElement('video');
+    previewVideo.src = url;
+    previewVideo.muted = true;
+    previewVideo.loop = true;
+    previewVideo.playsInline = true;
+    previewVideo.setAttribute('playsinline', '');
+    previewVideo.setAttribute('webkit-playsinline', '');
+    previewVideo.preload = 'metadata';
+    previewVideo.controls = true;
+    previewVideo.style.width = '100%';
+    previewVideo.style.height = '100%';
+    previewVideo.style.objectFit = 'cover';
+    previewVideo.style.borderRadius = '8px';
+    container.appendChild(previewVideo);
+
+    if (options.durationSec > getMaxVideoSecForOrder() + 0.15) {
+        appendTrimHintBadge(container, getMaxVideoSecForOrder());
+    }
+
+    const zone = document.getElementById('library-preview-zone');
+    const labelEl = document.getElementById('preview-library-label');
+    if (options.label && labelEl) {
+        labelEl.textContent = options.label;
+    }
+    if (zone && container.id === 'preview-library-video-container') {
+        zone.style.display = 'block';
+    }
+
+    if (options.onChange) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'preview-change-btn btn-primary order-upload-btn';
+        btn.textContent = t(options.changeKey || 'modals.video_change');
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            options.onChange();
+        });
+        container.appendChild(btn);
+    } else if (options.inputId) {
+        appendPreviewChangeButton(container, options.inputId, options.changeKey || 'modals.video_change');
+    }
+
+    syncUploadZonePreviewState(container);
+}
+
+function renderVideoUrlPreview(containerId, url, options = {}) {
+    const container = document.getElementById(containerId);
+    if (!container || !url) return;
+
+    container.innerHTML = '';
+    const maxSec = getMaxVideoSecForOrder();
+    const probe = document.createElement('video');
+    probe.preload = 'metadata';
+    probe.muted = true;
+    probe.playsInline = true;
+    probe.onloadedmetadata = () => {
+        mountUrlVideoPreview(container, url, { ...options, durationSec: probe.duration });
+    };
+    probe.onerror = () => mountUrlVideoPreview(container, url, options);
+    probe.src = url;
+}
+
 function renderVideoFilePreview(containerId, file, options = {}) {
     const container = document.getElementById(containerId);
     if (!container || !file) return;
@@ -3169,10 +3385,6 @@ function renderVideoFilePreview(containerId, file, options = {}) {
     probe.onloadedmetadata = () => {
         const duration = probe.duration;
         URL.revokeObjectURL(probeUrl);
-        if (isKalingSite()) {
-            kalingSelectedDurationSec = duration;
-            updateFirstOrderUI();
-        }
 
         container.innerHTML = '';
         const previewVideo = document.createElement('video');
@@ -3205,11 +3417,9 @@ function renderVideoFilePreview(containerId, file, options = {}) {
             badge.style.cssText = 'background:rgba(220,38,38,0.15);color:#ef4444;border:1px solid rgba(220,38,38,0.4);';
             badge.textContent = t('modals.video_too_long', { sec: maxDurationSec });
             container.appendChild(badge);
-            // Disable submit khi video quá dài
             const sb = document.getElementById('submit-btn');
             if (sb) sb.disabled = true;
         } else {
-            // Re-enable nếu video hợp lệ
             const sb = document.getElementById('submit-btn');
             if (sb) sb.disabled = false;
         }
@@ -3276,8 +3486,7 @@ window.handlePreview = (input, containerId) => {
     } else if (file.type.startsWith('video/')) {
         renderVideoFilePreview(containerId, file, {
             inputId: meta.inputId,
-            changeKey: meta.changeKey,
-            maxDurationSec: getSelectedModelMaxVideoSec(),
+            changeKey: meta.changeKey
         });
     }
 };
@@ -3313,10 +3522,7 @@ function sanitizeUploadFileName(name) {
     if (base.length > 80) base = base.substring(0, 80);
     if (!base) base = 'file';
 
-    // Worker R2 từ chối 400 nếu key chứa ".." (path traversal) — hay gặp khi tải TikTok/SnapSave.
-    let out = (base + ext).replace(/\.\.+/g, '_');
-    if (!out || out.includes('..') || out.startsWith('.')) out = 'file' + (ext || '.bin');
-    return out;
+    return base + ext;
 }
 
 async function uploadFile(file, folder) {
@@ -3355,12 +3561,7 @@ async function uploadFile(file, folder) {
                     reject(new Error(t('upload.error_bad_response')));
                 }
             } else {
-                const body = (xhr.responseText || '').toLowerCase();
-                if (xhr.status === 400 && body.includes('file key')) {
-                    reject(new Error(t('upload.error_invalid_filename')));
-                } else {
-                    reject(new Error(t('upload.error_server_rejected', { status: xhr.status })));
-                }
+                reject(new Error(t('upload.error_server_rejected', { status: xhr.status })));
             }
         };
 
@@ -3385,7 +3586,7 @@ async function setupEventListeners() {
                 renderVideoFilePreview('preview-video-container', file, {
                     inputId: 'file-video',
                     changeKey: 'modals.video_change',
-                    maxDurationSec: getSelectedModelMaxVideoSec(),
+                    maxDurationSec: getMaxVideoSecForOrder(),
                 });
             }
         });
@@ -3415,9 +3616,7 @@ async function setupEventListeners() {
             }
 
             if (!currentUser) {
-                // Nếu chưa đăng nhập thì hiện Auth Modal
-                const authModal = document.getElementById('auth-modal');
-                if (authModal) authModal.style.display = 'flex';
+                promptGoogleSignIn();
                 showToast(t('common.toast_login_required'));
                 return;
             }
@@ -3438,22 +3637,21 @@ async function setupEventListeners() {
             const { db, doc, collection, runTransaction, serverTimestamp } = window.firebase;
             const submitBtn = document.getElementById('order-submit-btn');
             const progressDiv = document.getElementById('upload-progress');
+            if (!submitBtn || !progressDiv) {
+                return showToast(t('common.error'));
+            }
 
             try {
-                const charFile = document.getElementById('file-char').files[0];
+                const charFile = document.getElementById('file-char')?.files?.[0];
                 let videoFile = document.getElementById('file-video')?.files?.[0];
                 const templateUrl = document.getElementById('selected-template-url')?.value || '';
                 const tiktokUrl = document.getElementById('tiktok-video-url')?.value?.trim() || '';
-                const modelKeySelected = getSelectedModelKey();
-                if (isFirstTimeUser && !isKalingSite()) {
-                    selectDefaultModel(PROMO_1_COIN_MODEL_KEY);
-                }
-                const modelKeyForOrder = getSelectedModelKey();
-
-                let kalingDurationSec = null;
-                if (isKalingSite()) {
-                    kalingSelectedDurationSec = null;
-                }
+                const promoAtSubmit = getDailyPromoStatus(FB_CACHE.myOrders || [], FB_CACHE.userProfile);
+                const modelKeySelected = promoAtSubmit.canUsePromo
+                    ? DAILY_PROMO_MODEL_KEY
+                    : getSelectedModelKey();
+                const serviceType = document.querySelector('input[name="service-type"]:checked')?.value || 'motion-to-char';
+                let modelIdOverride = null;
 
                 if (!charFile) {
                     const charZone = document.querySelector('#file-char')?.closest('.upload-zone');
@@ -3543,7 +3741,6 @@ async function setupEventListeners() {
                             const templateInput = document.getElementById('selected-template-url');
                             if (templateInput) templateInput.value = '';
                         }
-                        refDurationSec = prepared.durationSec;
                         if (prepared.serverTrimPending) {
                             showToast(t('modals.video_server_trim_mobile', { sec: maxSec }));
                         }
@@ -3555,18 +3752,8 @@ async function setupEventListeners() {
                     }
                 }
 
-                if (isKalingSite()) {
-                    kalingDurationSec = refDurationSec;
-                    if (videoFile && (kalingDurationSec == null || !Number.isFinite(kalingDurationSec))) {
-                        kalingDurationSec = await getVideoDurationSeconds(videoFile);
-                    }
-                    if (kalingDurationSec == null || !Number.isFinite(kalingDurationSec)) {
-                        hideVideoTrimOverlay();
-                        return showToast(t('modals.video_upload_required'));
-                    }
-                    kalingSelectedDurationSec = kalingDurationSec;
-                    updateFirstOrderUI();
-                }
+                // Model thường: auto select Aidancing id by uploaded video duration
+                // (Đã chuyển giao cho VPS backend site_bot.py tự động phân phối 159/160)
 
                 // Kiểm tra lại lần cuối trước khi upload
                 if (charFile.size > 10 * 1024 * 1024) {
@@ -3580,40 +3767,45 @@ async function setupEventListeners() {
 
                 submitBtn.disabled = true;
                 showVideoTrimOverlay('modals.order_uploading_char');
+
+                // Show loading
                 const mainTextInitial = submitBtn.querySelector('[data-i18n="hero.cta_create"]');
                 if (mainTextInitial) mainTextInitial.innerText = t('common.loading');
                 progressDiv.style.display = 'block';
 
                 // 1. Check coins first (Transaction)
                 const userRef = doc(db, "users", currentUser.uid);
+                const cachedOrders = FB_CACHE.myOrders || [];
                 const userSnap = await runTransaction(db, async (transaction) => {
                     const userDoc = await transaction.get(userRef);
-                    const modelKey = modelKeyForOrder;
-                    const serviceType = document.querySelector('input[name="service-type"]:checked').value;
-                    let model = { ...localizedModel(modelKey) };
+                    if (!userDoc.exists()) throw t('common.error');
 
-                    const userData = userDoc.data();
-                    const promo = getPromo1CoinEligibilityFromUser(userData);
-                    if (!isKalingSite() && promo.eligible) {
-                        model = modelForPromo1CoinOrder();
-                    } else if (!isKalingSite() && model.cost === 1) {
-                        if (promo.usedToday) throw t('modals.promo1coin_daily_limit');
-                        if (promo.totalUsed >= PROMO_1_COIN_MAX_TOTAL) throw t('modals.promo1coin_max_reached');
-                    } else if (isKalingSite() && kalingDurationSec != null) {
-                        model.cost = kalingCoinsForDuration(kalingDurationSec);
-                        model.vaeDurationSec = Math.ceil(kalingDurationSec);
+                    const modelKey = modelKeySelected;
+                    const baseModel = localizedModel(modelKey) || localizedModel('quality15');
+                    let model = { ...baseModel };
+
+                    const userData = userDoc.data() || {};
+                    const promoCounts = readPromoCountsInTransaction(
+                        transaction, currentUser.uid, userData
+                    );
+                    const canUsePromo = promoCounts.totalCount < DAILY_PROMO_MAX_TOTAL
+                        && promoCounts.todayCount < DAILY_PROMO_PER_DAY;
+                    if (canUsePromo) {
+                        model = modelForDailyPromoOrder();
+                    } else if (modelIdOverride) {
+                        model.modelId = modelIdOverride;
+                    }
+                    if (canUsePromo) {
+                        console.log(`🎁 Ưu đãi ngày (tx): còn ${DAILY_PROMO_MAX_TOTAL - promoCounts.totalCount} lượt @ ${DAILY_PROMO_COST} coin`);
                     }
 
-                    if (userDoc.data().coins < model.cost) {
+                    if ((userData.coins || 0) < model.cost) {
                         throw t('modals.insufficient_coins_title');
                     }
-                    if (isKalingSite() && (!Number.isFinite(Number(model.cost)) || Number(model.cost) < 1)) {
-                        throw t('modals.video_upload_required');
-                    }
-                    return { currentCoins: userDoc.data().coins, model, serviceType };
+                    return { currentCoins: userData.coins, model, serviceType };
                 });
 
-                const { model, serviceType } = userSnap;
+                const { model } = userSnap;
 
                 hideVideoTrimOverlay();
 
@@ -3651,55 +3843,53 @@ async function setupEventListeners() {
                             }
 
                             updateVideoTrimOverlay('modals.order_creating');
-
-                            // 3. Finalize Transaction (Deduct coins and create order)
-                            const orderId = await runTransaction(db, async (transaction) => {
+                            const { orderId, remainingCoins } = await runTransaction(db, async (transaction) => {
                                 const userDoc = await transaction.get(userRef);
-                                const userData = userDoc.data();
-                                const currentCoins = userData.coins;
-                                const todayKey = getLocalDayKey();
-                                const isPromoOrder = model.promo1Coin === true || model.cost === 1;
+                                if (!userDoc.exists()) throw t('common.error');
 
-                                if (isPromoOrder) {
-                                    const promo = getPromo1CoinEligibilityFromUser(userData);
-                                    if (!promo.eligible) {
-                                        if (promo.usedToday) throw t('modals.promo1coin_daily_limit');
-                                        throw t('modals.promo1coin_max_reached');
-                                    }
-                                    Object.assign(model, modelForPromo1CoinOrder());
-                                } else if (isKalingSite() && kalingDurationSec != null) {
-                                    model.cost = kalingCoinsForDuration(kalingDurationSec);
-                                    model.vaeDurationSec = Math.ceil(kalingDurationSec);
+                                const modelKey = modelKeySelected;
+                                const baseModel = localizedModel(modelKey) || localizedModel('quality15');
+                                let orderModel = { ...baseModel };
+
+                                const userData = userDoc.data() || {};
+                                const promoCounts = readPromoCountsInTransaction(
+                                    transaction, currentUser.uid, userData
+                                );
+                                const canUsePromo = promoCounts.totalCount < DAILY_PROMO_MAX_TOTAL
+                                    && promoCounts.todayCount < DAILY_PROMO_PER_DAY;
+                                if (canUsePromo) {
+                                    orderModel = modelForDailyPromoOrder();
+                                } else if (modelIdOverride) {
+                                    orderModel.modelId = modelIdOverride;
+                                }
+                                const finalCost = canUsePromo ? DAILY_PROMO_COST : orderModel.cost;
+                                const isDailyPromo = canUsePromo;
+                                const currentCoins = userData.coins || 0;
+
+                                if (currentCoins < finalCost) {
+                                    throw t('modals.insufficient_coins_title');
                                 }
 
                                 const aspectRatioEl = document.querySelector('input[name="aspect-ratio"]:checked');
                                 const aspectRatio = aspectRatioEl ? aspectRatioEl.value : '16:9';
+                                const coinsAfter = currentCoins - finalCost;
 
-                                const userUpdate = {
-                                    coins: currentCoins - model.cost,
-                                    updatedAt: serverTimestamp()
-                                };
-                                if (model.promo1Coin) {
-                                    userUpdate.promo1CoinCount = (Number(userData.promo1CoinCount) || 0) + 1;
-                                    userUpdate.promo1CoinLastDay = todayKey;
+                                if (finalCost > 0) {
+                                    transaction.update(userRef, { coins: coinsAfter });
                                 }
-                                transaction.update(userRef, userUpdate);
+                                applyPromoUserDocUpdate(
+                                    transaction, userRef, promoCounts, isDailyPromo, userData
+                                );
 
-                                const orderRef = doc(collection(db, "orders"));
-                                transaction.set(orderRef, {
+                                const orderPayload = {
                                     userId: currentUser.uid,
-                                    userEmail: currentUser.email,
-                                    userName: currentUser.displayName,
-                                    packageName: model.name,
-                                    modelId: model.modelId,
-                                    renderProvider: model.renderProvider || "aidancing",
-                                    ...(model.vaeDurationSec ? { vaeDurationSec: model.vaeDurationSec } : {}),
-                                    ...(model.maxVideoSec ? { maxVideoSec: model.maxVideoSec } : {}),
-                                    ...(model.vaeResolution ? { vaeResolution: model.vaeResolution } : {}),
+                                    userEmail: currentUser.email || '',
+                                    userName: currentUser.displayName || userDisplayLabel(currentUser),
+                                    packageName: orderModel.name,
+                                    modelId: orderModel.modelId,
                                     serviceType: serviceType,
                                     serviceLabel: SERVICE_TYPE_MAP()[serviceType] || serviceType,
-                                    costCoins: model.cost,
-                                    promo1Coin: !!model.promo1Coin,
+                                    costCoins: finalCost,
                                     characterImageLink: charUrl,
                                     referenceVideoLink: videoUrl,
                                     aspectRatio: aspectRatio,
@@ -3709,8 +3899,27 @@ async function setupEventListeners() {
                                     clientVersion: APP_CLIENT_VERSION,
                                     createdAt: serverTimestamp(),
                                     updatedAt: serverTimestamp()
-                                });
-                                return orderRef.id;
+                                };
+                                if (orderModel.renderProvider) {
+                                    orderPayload.renderProvider = orderModel.renderProvider;
+                                }
+                                if (orderModel.vaeDurationSec) {
+                                    orderPayload.vaeDurationSec = orderModel.vaeDurationSec;
+                                }
+                                if (orderModel.maxVideoSec) {
+                                    orderPayload.maxVideoSec = orderModel.maxVideoSec;
+                                }
+                                if (orderModel.vaeResolution) {
+                                    orderPayload.vaeResolution = orderModel.vaeResolution;
+                                }
+                                if (isDailyPromo) {
+                                    orderPayload.dailyPromo = true;
+                                    orderPayload.promoDate = getVnDateString();
+                                }
+
+                                const orderRef = doc(collection(db, "orders"));
+                                transaction.set(orderRef, orderPayload);
+                                return { orderId: orderRef.id, remainingCoins: coinsAfter };
                             });
 
                             showToast(t('common.toast_order_created'));
@@ -3742,45 +3951,38 @@ async function setupEventListeners() {
                                 content_name: serviceLabelPixel
                             });
 
-                            // Update order state for immediate UI feedback
                             orderCount++;
-                            syncPromo1CoinState(FB_CACHE.myOrders || [], window.__currentUserData);
                             updateFirstOrderUI();
 
                             document.getElementById('order-form').reset();
-                            selectDefaultModel(isFirstTimeUser && !isKalingSite() ? PROMO_1_COIN_MODEL_KEY : DEFAULT_MODEL_KEY);
-                            ['preview-char-container', 'preview-video-container', 'preview-tiktok-video-container'].forEach((id) => {
+                            selectDefaultModel(DEFAULT_MODEL_KEY);
+                            ['preview-char-container', 'preview-video-container', 'preview-library-video-container', 'preview-tiktok-video-container'].forEach((id) => {
                                 const el = document.getElementById(id);
                                 if (el) {
                                     el.innerHTML = '';
                                     syncUploadZonePreviewState(el);
                                 }
                             });
-                            const tiktokInput = document.getElementById('tiktok-video-url');
-                            if (tiktokInput) tiktokInput.value = '';
+                            clearLibraryTemplateSelection();
                             showDashboard();
                             const serviceLabel = SERVICE_TYPE_MAP()[serviceType] || serviceType;
+                            const customerName = escapeHTML(currentUser.displayName || userDisplayLabel(currentUser));
+                            const customerEmail = escapeHTML(currentUser.email || '—');
                             const msg = `🚀 <b>ĐƠN HÀNG MỚI: ${serviceLabel.toUpperCase()}</b>\n\n` +
                                 `🆔 Mã đơn: #${orderId}\n` +
-                                `👤 Khách: ${escapeHTML(currentUser.displayName)}\n` +
-                                `📧 Email: ${escapeHTML(currentUser.email)}\n` +
+                                `👤 Khách: ${customerName}\n` +
+                                `📧 Email: ${customerEmail}\n` +
                                 `🔧 Dịch vụ: <b>${serviceLabel}</b>\n` +
                                 `📦 Gói: ${model.name}\n` +
                                 `💰 Chi phí: ${model.cost} Coin\n` +
+                                `💳 Coin còn lại: <b>${remainingCoins}</b> Coin\n` +
                                 `🖼 <a href="${charUrl}">Xem ảnh nhân vật</a>\n` +
                                 `📹 <a href="${videoUrl}">Xem video tham chiếu</a>`;
                             sendTelegramMessage(msg);
                             hideVideoTrimOverlay();
                         } catch (err) {
                             console.error("Order Creation Error:", err);
-                            const errMsg = err?.message || err;
-                            if (errMsg === t('modals.promo1coin_daily_limit') || errMsg === t('modals.promo1coin_max_reached')) {
-                                showToast(errMsg);
-                                syncPromo1CoinState(FB_CACHE.myOrders || [], window.__currentUserData);
-                                updateFirstOrderUI();
-                            } else {
-                                showToast(t('common.error') + ": " + errMsg);
-                            }
+                            showToast(t('common.error') + ": " + (err.message || err));
                         } finally {
                             hideVideoTrimOverlay();
                             submitBtn.disabled = false;
@@ -3805,12 +4007,9 @@ async function setupEventListeners() {
                             if (window.openPricingModal) window.openPricingModal();
                         }
                     });
-                } else if (error === t('modals.promo1coin_daily_limit') || error === t('modals.promo1coin_max_reached')) {
-                    showToast(error);
-                    syncPromo1CoinState(FB_CACHE.myOrders || [], window.__currentUserData);
-                    updateFirstOrderUI();
                 } else {
-                    showToast(t('common.error') + ": " + error);
+                    const errMsg = typeof error === 'string' ? error : (error?.message || String(error));
+                    showToast(t('common.error') + ": " + errMsg);
                 }
             } finally {
                 submitBtn.disabled = false;
@@ -3878,16 +4077,31 @@ function loadMyOrders() {
         FB_CACHE.myOrders = snapshot.docs.map(d => ({ id: d.id, ...d.data() }));
 
         orderCount = snapshot.size;
-        syncPromo1CoinState(FB_CACHE.myOrders, window.__currentUserData);
-        ensureUserPromoFieldsSynced(FB_CACHE.myOrders, window.__currentUserData);
-        console.log("🔍 loadMyOrders: orderCount =", orderCount, "promo1Coin =", promo1CoinStats);
+        const promo = getDailyPromoStatus(FB_CACHE.myOrders, FB_CACHE.userProfile);
+        dailyPromoRemaining = promo.remainingToday;
+        console.log("🔍 loadMyOrders: orderCount =", orderCount, "dailyPromo remaining =", dailyPromoRemaining);
         updateFirstOrderUI();
 
         renderMyOrders();
     }));
 }
 
-/** Ghi chú đơn hiển thị cho khách — không lộ engine render. */
+/** Nhãn dịch vụ trên thẻ đơn — không lộ engine (VAE/weavy/XiaoYang…). */
+function userFacingServiceLabel(order) {
+    const raw = (order && (order.serviceLabel || order.packageName)) || '';
+    if (!raw) return '';
+    return String(raw)
+        .replace(/\s*[·•|]\s*VAE\b.*$/i, '')
+        .replace(/\s*[·•|]\s*weavy[\w-]*/gi, '')
+        .replace(/\bVideoAiEasy\b/gi, '')
+        .replace(/\bXiaoYang\b/gi, '')
+        .replace(/\bAidancing\b/gi, '')
+        .replace(/\s{2,}/g, ' ')
+        .replace(/\s*[·•|]\s*$/g, '')
+        .trim();
+}
+
+/** Ghi chú đơn hiển thị cho khách — không lộ engine render (Aidancing/XiaoYang). */
 function userFacingOrderNote(order) {
     const raw = (order && order.systemNote) || '';
     if (!raw) return '';
@@ -3896,6 +4110,62 @@ function userFacingOrderNote(order) {
         .replace(/\bAidancing\b/gi, 'hệ thống')
         .replace(/\baidancing\.net\b/gi, 'hệ thống')
         .replace(/\bxiaoyang\.online\b/gi, 'hệ thống');
+}
+
+function buildOrderCardHtml(d) {
+    const orderId = d.id.substring(d.id.length - 6).toUpperCase();
+    const createdDateObj = safeToDate(d.createdAt);
+    const date = createdDateObj ? createdDateObj.toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }) : '...';
+    const statusVN = STATUS_MAP()[d.status] || d.status;
+    const isNew = createdDateObj && (Date.now() - createdDateObj.getTime() < 5 * 60 * 1000);
+    const isCompleted = d.status === 'completed' || d.status === 'done';
+    const finalResultLink = d.resultLink;
+    const isPendingLong = d.status === 'pending' && createdDateObj && (Date.now() - createdDateObj.getTime() > 10 * 60 * 1000);
+    const delayNote = isPendingLong ? `<div class="order-delay-note">${t('dashboard.delay_note')}</div>` : '';
+    const safeResultLink = finalResultLink ? finalResultLink.replace(/'/g, "\\'") : '';
+
+    return `
+        <div class="order-card ${isNew ? 'new-order-highlight' : ''}" onclick="${isCompleted && finalResultLink ? `window.playOrderVideo(event, '${safeResultLink}')` : `window.openUserOrderDetail('${d.id}')`}">
+            <div class="order-thumb-wrapper">
+                <img src="${escapeHTML(d.characterImageLink || '')}" class="order-thumb" alt="">
+                ${isCompleted && finalResultLink ? `
+                    <div class="play-button-overlay">
+                        <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+                    </div>
+                ` : ''}
+                <div class="order-status-overlay">
+                    <span class="status-badge status-${escapeHTML(d.status || 'pending')}">${escapeHTML(statusVN)}</span>
+                </div>
+                ${isNew ? '<span class="new-badge-float">NEW</span>' : ''}
+            </div>
+            <div class="order-info">
+                <div class="order-id-row">
+                    <span class="order-id-text">#${escapeHTML(orderId)}</span>
+                    <span class="order-date-text">${escapeHTML(date)}</span>
+                </div>
+                <div class="order-type-text">${escapeHTML(userFacingServiceLabel(d))}</div>
+                ${delayNote}
+                ${userFacingOrderNote(d) ? `<div class="order-system-note">💬 ${escapeHTML(userFacingOrderNote(d))}</div>` : ''}
+                <div class="order-footer">
+                    <div class="order-cost-tag">
+                        <svg style="width: 12px; height: 12px;" viewBox="0 0 24 24" fill="none">
+                            <path d="M12 2L20.66 7V17L12 22L3.34 17V7L12 2Z" fill="url(#coin-gradient)" fill-opacity="0.2" stroke="url(#coin-gradient)" stroke-width="2"/>
+                            <path d="M12 6L17.2 9V15L12 18L6.8 15V9L12 6Z" fill="url(#coin-gradient)"/>
+                        </svg>
+                        <span>${Number(d.costCoins) || 0}</span>
+                    </div>
+                    <div style="display: flex; gap: 8px; align-items: center;">
+                        ${isCompleted && finalResultLink ? `
+                            <button type="button" class="order-download-btn" data-url="${escapeHTML(finalResultLink)}" data-name="${escapeHTML(`motionai_video_${orderId}.mp4`)}" data-mime="video/mp4" onclick="window.downloadMediaFromEl(event, this)">
+                                ${t('dashboard.download_btn')}
+                            </button>
+                        ` : ''}
+                        <button class="order-view-btn" onclick="event.stopPropagation(); window.openUserOrderDetail('${escapeHTML(d.id)}')">${t('dashboard.action_view_details')}</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
 }
 
 function renderMyOrders() {
@@ -3920,65 +4190,9 @@ function renderMyOrders() {
         return timeB - timeA;
     });
 
-    if (countText) countText.innerText = t('dashboard.orders_count', { count: sortedDocs.length });
+    if (countText) countText.innerText = `${sortedDocs.length} Videos`;
 
-    grid.innerHTML = sortedDocs.map(d => {
-            const orderId = d.id.substring(d.id.length - 6).toUpperCase();
-            const createdDateObj = safeToDate(d.createdAt);
-            const date = createdDateObj ? createdDateObj.toLocaleString(localeTag(), { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }) : '...';
-            const statusVN = STATUS_MAP()[d.status] || d.status;
-            const isNew = createdDateObj && (Date.now() - createdDateObj.getTime() < 5 * 60 * 1000);
-            const isCompleted = d.status === 'completed' || d.status === 'done';
-            const finalResultLink = d.resultLink;
-
-            const isPendingLong = d.status === 'pending' && createdDateObj && (Date.now() - createdDateObj.getTime() > 10 * 60 * 1000);
-            const delayNote = isPendingLong ? `<div class="order-delay-note">${t('dashboard.delay_note')}</div>` : '';
-
-            return `
-                <div class="order-card ${isNew ? 'new-order-highlight' : ''}" onclick="${isCompleted && d.resultLink ? `window.playOrderVideo(event, '${d.resultLink}')` : `window.openUserOrderDetail('${d.id}')`}">
-                    <div class="order-thumb-wrapper">
-                        <img src="${d.characterImageLink}" class="order-thumb">
-                        
-                        ${isCompleted && d.resultLink ? `
-                            <div class="play-button-overlay">
-                                <svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-                            </div>
-                        ` : ''}
-
-                        <div class="order-status-overlay">
-                            <span class="status-badge status-${d.status}">${statusVN}</span>
-                        </div>
-                        ${isNew ? '<span class="new-badge-float">NEW</span>' : ''}
-                    </div>
-                    <div class="order-info">
-                        <div class="order-id-row">
-                            <span class="order-id-text">#${orderId}</span>
-                            <span class="order-date-text">${date}</span>
-                        </div>
-                        <div class="order-type-text">${d.serviceLabel || ''}</div>
-                        ${delayNote}
-                        ${userFacingOrderNote(d) ? `<div class="order-system-note">💬 ${escapeHTML(userFacingOrderNote(d))}</div>` : ''}
-                        <div class="order-footer">
-                            <div class="order-cost-tag">
-                                <svg style="width: 12px; height: 12px;" viewBox="0 0 24 24" fill="none">
-                                    <path d="M12 2L20.66 7V17L12 22L3.34 17V7L12 2Z" fill="url(#coin-gradient)" fill-opacity="0.2" stroke="url(#coin-gradient)" stroke-width="2"/>
-                                    <path d="M12 6L17.2 9V15L12 18L6.8 15V9L12 6Z" fill="url(#coin-gradient)"/>
-                                </svg>
-                                <span>${d.costCoins}</span>
-                            </div>
-                            <div style="display: flex; gap: 8px; align-items: center;">
-                                ${isCompleted && finalResultLink ? `
-                                    <button type="button" class="order-download-btn" data-url="${escapeHTML(finalResultLink)}" data-name="${escapeHTML(`motionai_video_${orderId}.mp4`)}" data-mime="video/mp4" onclick="window.downloadMediaFromEl(event, this)">
-                                        ${t('dashboard.download_btn')}
-                                    </button>
-                                ` : ''}
-                                <button class="order-view-btn" onclick="event.stopPropagation(); window.openUserOrderDetail('${d.id}')">${t('dashboard.action_view_details')}</button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            `;
-        }).join('');
+    grid.innerHTML = sortedDocs.map((d) => buildOrderCardHtml(d)).join('');
 }
 
 
@@ -4051,7 +4265,7 @@ function renderMyTopups() {
 
     list.innerHTML = sortedDocs.map(d => {
         const createdDateObj = safeToDate(d.createdAt);
-        const date = createdDateObj ? createdDateObj.toLocaleString(localeTag(), { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric' }) : '...';
+        const date = createdDateObj ? createdDateObj.toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit', year: 'numeric' }) : '...';
         const statusVN = STATUS_MAP()[d.status] || d.status;
         return `
             <tr>
@@ -4089,7 +4303,7 @@ window.viewFullImage = (url) => {
     modal.style.display = 'flex';
 };
 
-// --- Maintenance (nightly + one-time upgrade window) ---
+// --- Maintenance (nightly + one-time upgrade 03/06/2026 20:30–22:30 VN) ---
 const UPGRADE_MAINTENANCE = {
     date: { y: 2026, m: 6, d: 3 },
     startMin: 20 * 60 + 30,
@@ -4354,7 +4568,8 @@ function scheduleRenderAdminBots() {
     }, 400);
 }
 
-const RENDER_PROVIDER_BOT_ID = 'mac_motionai_bot';
+// Doc bots mà VPS dùng — admin đã có quyền ghi collection bots (không cần settings/render).
+const RENDER_PROVIDER_BOT_ID = 'mac_nhaycloud_bot';
 
 let adminActiveRenderProvider = 'xiaoyang';
 
@@ -4464,7 +4679,7 @@ function renderAdminEngineBalances() {
         const dt = safeToDate(updated);
         updatedEl.textContent = dt
             ? t('admin.engine_balances_updated', {
-                time: dt.toLocaleString(localeTag())
+                time: dt.toLocaleString(currentLang === 'en' ? 'en-US' : 'vi-VN')
             })
             : '';
     }
@@ -4555,7 +4770,7 @@ function renderAdminBots() {
     list.innerHTML = rows.map(b => {
         const started = safeToDate(b.startedAt) || safeToDate(b.createdAt);
         const startedStr = started
-            ? started.toLocaleString(localeTag())
+            ? started.toLocaleString(currentLang === 'en' ? 'en-US' : 'vi-VN')
             : '—';
         const enabled = !!b.enabled;
         const runLabel = enabled ? t('admin.bots_running') : t('admin.bots_stopped');
@@ -4762,7 +4977,7 @@ function renderAdminReferrals() {
         const money = getReferralMoneyFields(d);
         const ref = getReferrerDisplay(d);
         const dateStr = safeToDate(d.createdAt)
-            ? safeToDate(d.createdAt).toLocaleString(localeTag())
+            ? safeToDate(d.createdAt).toLocaleString(currentLang === 'en' ? 'en-US' : 'vi-VN')
             : '—';
         return `
             <tr>
@@ -4853,158 +5068,111 @@ window.deleteUserAdmin = async (userId) => {
     }
 };
 
-const INACTIVE_USER_MIN_AGE_MS = 24 * 60 * 60 * 1000;
-const FIRESTORE_PAGE_SIZE = 400;
-const FIRESTORE_BATCH_DELETE_SIZE = 400;
+const PURGE_INACTIVE_USER_DAYS = 3;
+const TOPUP_SUCCESS_STATUSES = ['approved', 'completed'];
 
-async function fetchAllFirestoreDocs(collectionName) {
-    const { db, collection, query, orderBy, getDocs, limit, startAfter } = window.firebase;
-    const all = [];
-    let cursor = null;
-    for (;;) {
-        const constraints = [orderBy('createdAt', 'desc'), limit(FIRESTORE_PAGE_SIZE)];
-        if (cursor) constraints.push(startAfter(cursor));
-        const snap = await getDocs(query(collection(db, collectionName), ...constraints));
-        if (snap.empty) break;
-        all.push(...snap.docs);
-        cursor = snap.docs[snap.docs.length - 1];
-        if (snap.size < FIRESTORE_PAGE_SIZE) break;
-    }
-    return all;
-}
-
-async function fetchAllFirestoreDocsSimple(collectionName) {
-    const { db, collection, getDocs } = window.firebase;
-    const snap = await getDocs(collection(db, collectionName));
-    return snap.docs;
-}
-
-function collectUserIdsFromDocs(docs) {
-    const ids = new Set();
-    for (const d of docs) {
-        const uid = d.data()?.userId;
-        if (uid) ids.add(uid);
-    }
-    return ids;
-}
-
-function buildReferralProtectedUserIds(userDocs, referralEarningDocs, referralCodeDocs) {
-    const ids = new Set();
-    for (const d of userDocs) {
-        const data = d.data() || {};
-        if (data.referredBy) {
-            ids.add(d.id);
-            ids.add(data.referredBy);
-        }
-        if (data.referralCode) ids.add(d.id);
-    }
-    for (const d of referralEarningDocs) {
-        const data = d.data() || {};
-        if (data.referrerId) ids.add(data.referrerId);
-        if (data.referredUserId) ids.add(data.referredUserId);
-    }
-    for (const d of referralCodeDocs) {
-        const uid = d.data()?.uid;
-        if (uid) ids.add(uid);
-    }
-    return ids;
-}
-
-function isInactiveGhostUser(userData, userId, cutoffMs, orderUserIds, topupUserIds, referralUserIds, selfUid) {
-    if (!userData || userId === selfUid) return false;
+function isProtectedAdminUser(userData) {
+    if (!userData) return true;
     const role = userData.role || 'user';
-    if (role === 'admin' || role === 'super-admin') return false;
-    const created = safeToDate(userData.createdAt);
-    if (!created || created.getTime() > cutoffMs) return false;
-    if (orderUserIds.has(userId) || topupUserIds.has(userId)) return false;
-    if (referralUserIds.has(userId)) return false;
-    return true;
+    if (role === 'admin' || role === 'super-admin') return true;
+    const email = (userData.email || '').toLowerCase();
+    if (email && SUPER_ADMIN_EMAILS.includes(email)) return true;
+    return false;
 }
 
-async function deleteUsersInBatches(userIds) {
-    const { db, doc, writeBatch } = window.firebase;
-    let deleted = 0;
-    for (let i = 0; i < userIds.length; i += FIRESTORE_BATCH_DELETE_SIZE) {
-        const chunk = userIds.slice(i, i + FIRESTORE_BATCH_DELETE_SIZE);
-        const batch = writeBatch(db);
-        chunk.forEach((uid) => batch.delete(doc(db, 'users', uid)));
-        await batch.commit();
-        deleted += chunk.length;
+async function collectToppedUpUserIds() {
+    const { db, collection, query, where, getDocs } = window.firebase;
+    const toppedUp = new Set();
+    for (const status of TOPUP_SUCCESS_STATUSES) {
+        const snap = await getDocs(query(collection(db, 'topups'), where('status', '==', status)));
+        snap.docs.forEach((docSnap) => {
+            const uid = docSnap.data()?.userId;
+            if (uid) toppedUp.add(uid);
+        });
     }
-    return deleted;
+    return toppedUp;
 }
 
-window.purgeInactiveUsers = async () => {
+async function fetchAllUsersForPurge() {
+    if (FB_CACHE.adminUsersFull?.length) return FB_CACHE.adminUsersFull;
+    const { db, collection, getDocs } = window.firebase;
+    const snap = await getDocs(collection(db, 'users'));
+    const users = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    FB_CACHE.adminUsersFull = users;
+    FB_CACHE.adminUsersTruncated = false;
+    return users;
+}
+
+function listUsersEligibleForInactivePurge(allUsers, toppedUpUserIds) {
+    const cutoffMs = Date.now() - PURGE_INACTIVE_USER_DAYS * 24 * 60 * 60 * 1000;
+    const eligible = [];
+    for (const u of allUsers) {
+        if (isProtectedAdminUser(u)) continue;
+        if (toppedUpUserIds.has(u.id)) continue;
+        const createdMs = safeToDate(u.createdAt)?.getTime();
+        if (!createdMs || createdMs > cutoffMs) continue;
+        eligible.push(u);
+    }
+    return eligible;
+}
+
+window.purgeInactiveUsersAdmin = async () => {
     if (!window.__isSuperAdmin) {
-        return showToast(t('admin.purge_inactive_super_only'));
+        return showToast(t('admin.purge_inactive_users_denied'));
     }
-
-    const btn = document.getElementById('btn-purge-inactive-users');
+    const btn = document.getElementById('purge-inactive-users-btn');
     if (btn) btn.disabled = true;
-    showToast(t('admin.purge_inactive_scanning'));
 
     try {
-        const cutoffMs = Date.now() - INACTIVE_USER_MIN_AGE_MS;
-        const selfUid = window.currentUser?.uid || '';
-
-        const [userDocs, orderDocs, topupDocs, referralEarningDocs, referralCodeDocs] = await Promise.all([
-            fetchAllFirestoreDocs('users'),
-            fetchAllFirestoreDocs('orders'),
-            fetchAllFirestoreDocs('topups'),
-            fetchAllFirestoreDocs('referralEarnings'),
-            fetchAllFirestoreDocsSimple('referralCodes')
+        showToast(t('admin.purge_inactive_users_scanning'));
+        const [allUsers, toppedUpUserIds] = await Promise.all([
+            fetchAllUsersForPurge(),
+            collectToppedUpUserIds()
         ]);
-
-        const orderUserIds = collectUserIdsFromDocs(orderDocs);
-        const topupUserIds = collectUserIdsFromDocs(topupDocs);
-        const referralUserIds = buildReferralProtectedUserIds(userDocs, referralEarningDocs, referralCodeDocs);
-
-        const toDelete = [];
-        for (const d of userDocs) {
-            if (isInactiveGhostUser(d.data(), d.id, cutoffMs, orderUserIds, topupUserIds, referralUserIds, selfUid)) {
-                toDelete.push({ id: d.id, email: d.data()?.email || '', displayName: d.data()?.displayName || '' });
-            }
-        }
+        const toDelete = listUsersEligibleForInactivePurge(allUsers, toppedUpUserIds);
 
         if (toDelete.length === 0) {
-            showToast(t('admin.purge_inactive_none'));
+            showToast(t('admin.purge_inactive_users_none'));
             return;
         }
 
-        const previewLines = toDelete.slice(0, 8).map((u) =>
-            `• ${escapeHTML(u.displayName || t('common.guest'))} — ${escapeHTML(u.email || u.id)}`
-        ).join('<br>');
-        const moreNote = toDelete.length > 8
-            ? `<br><i>…${t('admin.purge_inactive_and_more', { count: toDelete.length - 8 })}</i>`
-            : '';
+        const preview = toDelete.slice(0, 5).map((u) => {
+            const label = u.displayName || u.email || u.id.slice(0, 8);
+            return `• ${label}`;
+        }).join('\n');
+        const more = toDelete.length > 5 ? `\n… +${toDelete.length - 5}` : '';
 
         window.niceConfirm({
-            title: t('admin.purge_inactive_confirm_title'),
-            message: t('admin.purge_inactive_confirm_msg', { count: toDelete.length }) +
-                `<br><br><div style="text-align:left;font-size:0.85rem;opacity:0.9;max-height:180px;overflow:auto;">${previewLines}${moreNote}</div>`,
-            icon: '🧹',
+            title: t('admin.purge_inactive_users_confirm_title'),
+            message: t('admin.purge_inactive_users_confirm_msg', { count: toDelete.length, preview: preview + more }),
+            icon: '🗑️',
             onConfirm: async () => {
-                const btn2 = document.getElementById('btn-purge-inactive-users');
-                if (btn2) btn2.disabled = true;
-                showToast(t('admin.purge_inactive_deleting', { count: toDelete.length }));
-                try {
-                    const deleted = await deleteUsersInBatches(toDelete.map((u) => u.id));
-                    FB_CACHE.adminUsers = (FB_CACHE.adminUsers || []).filter((u) => !toDelete.some((x) => x.id === u.id));
-                    if (FB_CACHE.adminUsersFull) {
-                        FB_CACHE.adminUsersFull = FB_CACHE.adminUsersFull.filter((u) => !toDelete.some((x) => x.id === u.id));
+                const { db, doc, deleteDoc } = window.firebase;
+                let deleted = 0;
+                let failed = 0;
+                for (const u of toDelete) {
+                    try {
+                        await deleteDoc(doc(db, 'users', u.id));
+                        deleted++;
+                    } catch (e) {
+                        failed++;
+                        console.warn('[Purge] delete failed:', u.id, e);
                     }
-                    renderAdminUsers();
-                    showToast(t('admin.purge_inactive_done', { count: deleted }));
-                } catch (e) {
-                    console.error('purgeInactiveUsers:', e);
-                    showToast(t('common.error_with_msg', { msg: e.message }));
-                } finally {
-                    if (btn2) btn2.disabled = false;
+                }
+                FB_CACHE.adminUsers = (FB_CACHE.adminUsers || []).filter((x) => !toDelete.some((d) => d.id === x.id));
+                if (FB_CACHE.adminUsersFull) {
+                    FB_CACHE.adminUsersFull = FB_CACHE.adminUsersFull.filter((x) => !toDelete.some((d) => d.id === x.id));
+                }
+                renderAdminUsers();
+                if (failed > 0) {
+                    showToast(t('admin.purge_inactive_users_partial', { deleted, failed }));
+                } else {
+                    showToast(t('admin.purge_inactive_users_done', { count: deleted }));
                 }
             }
         });
     } catch (e) {
-        console.error('purgeInactiveUsers scan:', e);
+        console.error('[Purge] scan failed:', e);
         showToast(t('common.error_with_msg', { msg: e.message }));
     } finally {
         if (btn) btn.disabled = false;
@@ -5443,7 +5611,7 @@ function renderAdminTopups() {
     }
 
     const filteredDocs = allDocs.filter(d => {
-        const text = `${d.userName} ${d.userEmail} ${d.transferContent} ${d.packageName}`.toLowerCase();
+        const text = `${d.userName} ${d.userEmail} ${d.userId} ${d.transferContent} ${d.packageName}`.toLowerCase();
         return text.includes(searchVal);
     });
 
@@ -5503,12 +5671,13 @@ function renderAdminTopups() {
         }
         const safeUrl = d.proofLink ? d.proofLink.replace(/'/g, "\\'") : '';
         const createdDateObj = safeToDate(d.createdAt);
-        const dateStr = createdDateObj ? createdDateObj.toLocaleString(localeTag(), { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }) : '';
+        const dateStr = createdDateObj ? createdDateObj.toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }) : '';
+        const customerCell = formatAdminTopupCustomerCell(d);
         return `
             <tr style="background: ${groupColor}; transition: background 0.3s ease;">
                 <td>
-                    <div>${escapeHTML(d.userName) || 'N/A'}</div>
-                    <small style="opacity:0.6;">${escapeHTML(d.userEmail) || ''}</small>
+                    <div>${customerCell.title}</div>
+                    ${customerCell.subline}
                     ${dateStr ? `<div style="font-size:0.7rem; color:#9ca3af; margin-top:2px;">🕐 ${dateStr}</div>` : ''}
                 </td>
                 <td>${escapeHTML(d.packageName) || ''}<br><strong>${d.amount ? d.amount.toLocaleString() : 0}đ</strong></td>
@@ -5673,7 +5842,7 @@ function renderAdminOrders() {
         }
         const orderId = d.id.substring(d.id.length - 6).toUpperCase();
         const createdDateObj = safeToDate(d.createdAt);
-        const dateStr = createdDateObj ? createdDateObj.toLocaleString(localeTag(), { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }) : '';
+        const dateStr = createdDateObj ? createdDateObj.toLocaleString('vi-VN', { hour: '2-digit', minute: '2-digit', day: '2-digit', month: '2-digit' }) : '';
         return `
             <tr style="background: ${groupColor}; transition: background 0.3s ease;">
                 <td style="font-family: monospace; font-weight: bold; color: var(--accent-primary);">
@@ -5825,11 +5994,11 @@ window.openUserOrderDetail = async (orderId) => {
                 </div>
                 `;
         })()}
-            ${d.adminNote ? `
+            ${userFacingOrderNote(d) ? `
             <div class="info-item" style="grid-column: span 2;">
                 <span class="info-label">${t('modals.order_system_note')}</span>
                 <div class="glass-card" style="padding: 1rem; border: 1px solid rgba(255,255,255,0.1); background: rgba(255,255,255,0.02); border-radius: 8px; color: var(--text-dim); line-height: 1.5;">
-                    ${d.adminNote}
+                    ${escapeHTML(userFacingOrderNote(d))}
                 </div>
             </div>
             ` : ''}
@@ -5989,7 +6158,7 @@ async function sendCompletionEmail(orderId, orderData) {
 }
 
 // ==========================================
-// 4 Model AI & Payment Tabs (Casso + PayPal)
+// 4 Model AI & Payment (VietQR / Casso)
 // ==========================================
 
 export function renderAIModels() {
@@ -6066,204 +6235,6 @@ window.createVideoWithModel = (modelId) => {
     // Mở Order Modal
     window.openOrderModal();
 };
-
-function renderIntlPackageInfo() {
-    if (!selectedTopupPackage) return;
-    const intlInfo = document.getElementById('intl-package-info');
-    if (!intlInfo) return;
-    intlInfo.innerHTML = `
-        <div style="font-size: 0.8rem; color: var(--text-muted); text-transform: uppercase; font-weight:600; margin-bottom: 5px;">${t('payment.intl_selected_package')}</div>
-        <div style="font-size: 1.8rem; font-weight: 800; color: var(--accent); margin: 0.5rem 0; letter-spacing: 0.5px;">${packageDisplayName(selectedTopupPackage)}</div>
-        <div style="font-size: 1.1rem; font-weight: 700; color: #fff; margin-bottom: 10px;">${t('payment.intl_coins', { coins: selectedTopupPackage.coins })}</div>
-        <div style="font-size: 1.4rem; font-weight: 800; color: #ffde00; margin-top: 0.8rem; background: rgba(255,222,0,0.1); padding: 8px; border-radius: 6px; display: inline-block;">${t('payment.intl_price', { price: selectedTopupPackage.usdPrice || '$5.99' })}</div>
-    `;
-}
-
-function showPaymentPanel(method) {
-    const vietqrContent = document.getElementById('payment-content-vietqr');
-    const intlContent = document.getElementById('payment-content-intl');
-    if (!vietqrContent || !intlContent) return;
-
-    if (method === 'intl') {
-        vietqrContent.style.display = 'none';
-        intlContent.style.display = 'block';
-        return;
-    }
-
-    vietqrContent.style.display = 'block';
-    intlContent.style.display = 'none';
-}
-
-// Kept for backward compatibility if anything still calls it.
-window.switchPaymentTab = (tabName) => showPaymentPanel(tabName);
-
-// ==========================================
-// PayPal Smart Buttons Integration
-// ==========================================
-
-// Cached PayPal config from /api/paypal-config (clientId + env).
-let _paypalConfig = null;
-// Resolves to true when SDK script has loaded once.
-let _paypalSdkPromise = null;
-// Last package we rendered buttons for, so we can re-render when user switches package.
-let _paypalLastPackageId = null;
-
-function setPaypalStatus(text, color) {
-    const el = document.getElementById('paypal-status');
-    if (!el) return;
-    el.textContent = text || '';
-    el.style.color = color || 'var(--text-muted)';
-}
-
-async function fetchPaypalConfig() {
-    if (_paypalConfig) return _paypalConfig;
-    const res = await fetch('/api/paypal-config');
-    if (!res.ok) throw new Error(`paypal-config HTTP ${res.status}`);
-    _paypalConfig = await res.json();
-    return _paypalConfig;
-}
-
-function loadPaypalSdk(clientId, currency) {
-    if (_paypalSdkPromise) return _paypalSdkPromise;
-    _paypalSdkPromise = new Promise((resolve, reject) => {
-        const s = document.createElement('script');
-        // disable-funding=credit,paylater so we only show wallet + card; tweak as needed.
-        s.src = `https://www.paypal.com/sdk/js?client-id=${encodeURIComponent(clientId)}&currency=${encodeURIComponent(currency || 'USD')}&intent=capture&components=buttons`;
-        s.async = true;
-        s.onload = () => resolve(window.paypal);
-        s.onerror = () => reject(new Error('Could not load PayPal SDK'));
-        document.head.appendChild(s);
-    });
-    return _paypalSdkPromise;
-}
-
-async function mountPaypalButtons(pkg) {
-    if (!pkg) return;
-    if (!currentUser) {
-        setPaypalStatus(t('payment.paypal_login_required'), '#ff6b6b');
-        return;
-    }
-
-    const container = document.getElementById('paypal-button-container');
-    if (!container) return;
-
-    // If the same package is already rendered, skip - PayPal buttons are idempotent
-    // per container, and re-rendering causes a flash.
-    if (_paypalLastPackageId === pkg.id && container.childElementCount > 0) {
-        return;
-    }
-
-    setPaypalStatus(t('payment.paypal_loading'), 'var(--text-muted)');
-    container.innerHTML = '';
-
-    const cfg = await fetchPaypalConfig();
-    if (!cfg.clientId) {
-        setPaypalStatus(t('payment.paypal_not_configured'), '#ff6b6b');
-        return;
-    }
-
-    // Show sandbox banner if applicable.
-    const banner = document.getElementById('paypal-sandbox-banner');
-    if (banner) banner.style.display = cfg.env === 'sandbox' ? 'block' : 'none';
-
-    const paypal = await loadPaypalSdk(cfg.clientId, cfg.currency || 'USD');
-    if (!paypal || !paypal.Buttons) {
-        setPaypalStatus(t('payment.paypal_sdk_unavailable'), '#ff6b6b');
-        return;
-    }
-
-    paypal.Buttons({
-        style: { layout: 'vertical', color: 'gold', shape: 'rect', label: 'paypal' },
-
-        createOrder: async () => {
-            setPaypalStatus(t('payment.paypal_creating_order'), 'var(--text-muted)');
-            const res = await fetch('/api/paypal-create-order', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    userId: currentUser.uid,
-                    packageId: pkg.id,
-                    userEmail: currentUser.email || ''
-                })
-            });
-            const data = await res.json();
-            if (!res.ok || !data.orderID) {
-                throw new Error(data.error || `Create order failed (${res.status})`);
-            }
-            return data.orderID;
-        },
-
-        onApprove: async (data) => {
-            setPaypalStatus(t('payment.paypal_processing'), 'var(--text-muted)');
-            try {
-                const res = await fetch('/api/paypal-capture-order', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ orderID: data.orderID })
-                });
-                const result = await res.json();
-                if (!res.ok) {
-                    throw new Error(result.error || `Capture failed (${res.status})`);
-                }
-                if (result.status === 'COMPLETED') {
-                    setPaypalStatus(t('payment.paypal_success_status'), '#27ae60');
-                    showToast(t('payment.toast_paypal_success'));
-                    // The webhook is the source of truth for coin grant; the
-                    // Firebase onSnapshot on the user doc will refresh the
-                    // balance display automatically.
-                    const paypalValue = parseFloat((pkg.usdPrice || '$0').replace('$', ''));
-                    if (typeof ttq !== 'undefined') {
-                        try {
-                            ttq.track('CompletePayment', {
-                                value: paypalValue,
-                                currency: 'USD',
-                                content_id: pkg.id
-                            });
-                        } catch (e) { /* swallow */ }
-                    }
-                    trackMetaEvent('Purchase', {
-                        value: paypalValue,
-                        currency: 'USD',
-                        content_ids: [pkg.id],
-                        content_name: pkg.name,
-                        content_type: 'product',
-                        num_items: 1
-                    });
-                    logFirebaseEvent('purchase', {
-                        currency: 'USD',
-                        value: paypalValue,
-                        transaction_id: data.orderID,
-                        items: [{ item_id: pkg.id, item_name: pkg.name }]
-                    });
-                } else {
-                    setPaypalStatus(t('payment.paypal_pending_status', { status: result.status }), '#ffde00');
-                }
-            } catch (err) {
-                console.error('[PayPal] onApprove error:', err);
-                setPaypalStatus(t('payment.paypal_capture_error', { msg: err.message || err }), '#ff6b6b');
-                showToast(t('payment.paypal_error', { msg: err.message || err }));
-            }
-        },
-
-        onCancel: () => {
-            setPaypalStatus(t('payment.paypal_cancelled'), 'var(--text-muted)');
-        },
-
-        onError: (err) => {
-            console.error('[PayPal] Buttons error:', err);
-            setPaypalStatus(t('payment.paypal_error', { msg: err.message || err }), '#ff6b6b');
-        }
-    }).render('#paypal-button-container').then(() => {
-        _paypalLastPackageId = pkg.id;
-        setPaypalStatus('', 'var(--text-muted)');
-    }).catch(err => {
-        console.error('[PayPal] Buttons render error:', err);
-        setPaypalStatus(t('payment.paypal_render_error', { msg: err.message || err }), '#ff6b6b');
-    });
-}
-
-// Expose for debugging from devtools.
-window.__paypal = { fetchPaypalConfig, mountPaypalButtons };
 
 // ==========================================
 // Referral / Affiliate System
@@ -6368,7 +6339,7 @@ function formatReferralMoney(amount, currency) {
     if ((currency || 'VND').toUpperCase() === 'USD') {
         return `$${n.toFixed(2)}`;
     }
-    return `${Math.round(n).toLocaleString(localeTag())}đ`;
+    return `${Math.round(n).toLocaleString('vi-VN')}đ`;
 }
 
 function referralGatewayLabel(gateway) {
@@ -6502,7 +6473,7 @@ async function openReferralPage() {
 
             const friendName = escapeHTML(d.referredUserName || t('common.guest'));
             const friendEmail = escapeHTML(d.referredUserEmail || '');
-            const dateStr = safeToDate(d.createdAt) ? safeToDate(d.createdAt).toLocaleString(localeTag()) : '—';
+            const dateStr = safeToDate(d.createdAt) ? safeToDate(d.createdAt).toLocaleString(currentLang === 'en' ? 'en-US' : 'vi-VN') : '—';
             const gatewayLabel = referralGatewayLabel(d.gateway);
             const baseMoney = formatReferralMoney(money.baseAmount, money.currency);
             const commissionMoney = formatReferralMoney(money.commissionAmount, money.currency);
@@ -6646,6 +6617,7 @@ async function payReferralCommissionClient(topupId, referredUserId, baseCoins, g
 }
 window.payReferralCommissionClient = payReferralCommissionClient;
 
+// --- Batch channel (modal on home) ---
 const BATCH_CHANNEL_CRON_HOUR_DEFAULT = 3;
 let _batchChannelPickerOrders = [];
 let _batchChannelCfg = null;
@@ -6682,6 +6654,17 @@ function resetBatchChannelForm({ keepDefaults = true } = {}) {
 }
 
 function applyBatchChannelConfigToForm(cfg) {
+    const wasPending = _batchChannelWasPending;
+    const pending = batchChannelRunNowPending(cfg);
+    _batchChannelWasPending = pending;
+
+    if (wasPending && !pending) {
+        if (cfg?.lastRunStatus === 'failed') {
+            const msg = batchChannelExplainRunMessage(cfg);
+            showToast(t('build_channel.status_run_failed', { msg }));
+        }
+    }
+
     renderBatchChannelStatus(cfg);
 
     const urlInput = document.getElementById('batch-channel-url');
@@ -6724,8 +6707,33 @@ function parseTikTokUsername(raw) {
     if (s.startsWith('@')) return s.slice(1).split('/')[0];
     const m = s.match(/tiktok\.com\/@([^/?#]+)/i);
     if (m) return m[1];
+    if (/^https?:\/\//i.test(s)) return '';
     return s.replace(/^@/, '').split('/')[0];
 }
+
+function getBatchChannelUrlError(channelUrl) {
+    const s = (channelUrl || '').trim();
+    if (!s) return 'need_channel';
+    if (!parseTikTokUsername(s)) {
+        return /^https?:\/\//i.test(s) ? 'invalid_channel' : 'need_channel';
+    }
+    return null;
+}
+
+function batchChannelExplainRunMessage(cfg) {
+    const raw = (cfg?.lastRunMessage || '').trim();
+    if (!raw) return '';
+    const low = raw.toLowerCase();
+    if (low.includes('invalid_channel') || low.includes('unique_id is invalid') || low.includes('tikwm')) {
+        return t('build_channel.status_invalid_channel');
+    }
+    if (low.includes('link kênh không hợp lệ') || low.includes('không nhận diện được kênh')) {
+        return raw;
+    }
+    return raw;
+}
+
+let _batchChannelWasPending = false;
 
 function batchChannelRunNowPending(cfg) {
     if (!cfg?.runNowRequestedAt) return false;
@@ -6870,7 +6878,7 @@ function batchChannelRunNowMode() {
 }
 
 function batchChannelPerVideoCost() {
-    return 20;
+    return MODELS.quality15.cost;
 }
 
 async function ensureBatchChannelCoins(triggerRun) {
@@ -6906,9 +6914,16 @@ async function persistBatchChannelConfig({ enable, triggerRun = false }) {
     const sourceMode = getBatchSourceModeFromUI();
     const selectedOrderIds = getBatchSelectedOrderIds();
 
-    if (sourceMode === 'tiktok' && !username) {
-        showToast(t('build_channel.status_need_channel'));
-        return false;
+    if (sourceMode === 'tiktok') {
+        const channelErr = getBatchChannelUrlError(channelUrl);
+        if (channelErr === 'invalid_channel') {
+            showToast(t('build_channel.status_invalid_channel'));
+            return false;
+        }
+        if (channelErr === 'need_channel' || !username) {
+            showToast(t('build_channel.status_need_channel'));
+            return false;
+        }
     }
     if (sourceMode === 'orders' && !selectedOrderIds.length) {
         showToast(t('build_channel.status_need_orders'));
@@ -7020,23 +7035,37 @@ function renderBatchChannelStatus(cfg) {
     const el = document.getElementById('batch-channel-status');
     let html = '';
     let show = false;
+    let isError = false;
+
+    const channelUrl = cfg?.channelUrl || document.getElementById('batch-channel-url')?.value || '';
+    const channelErr = getBatchChannelUrlError(channelUrl);
 
     if (cfg && batchChannelRunNowPending(cfg)) {
         html = t('build_channel.status_run_now_pending');
         show = true;
+    } else if (channelErr === 'invalid_channel') {
+        html = t('build_channel.status_invalid_channel');
+        show = true;
+        isError = true;
+    } else if (cfg?.lastRunStatus === 'failed' && cfg?.lastRunMessage) {
+        html = batchChannelExplainRunMessage(cfg);
+        show = true;
+        isError = true;
     } else if (cfg?.enabled) {
         const hour = cfg.cronHour != null ? Number(cfg.cronHour) : BATCH_CHANNEL_CRON_HOUR_DEFAULT;
         html = t('build_channel.status_on', { hour: Number.isFinite(hour) ? hour : BATCH_CHANNEL_CRON_HOUR_DEFAULT });
         if (cfg.lastRunMessage) html += ` — ${escapeHTML(cfg.lastRunMessage)}`;
         show = true;
     } else if (cfg?.lastRunMessage) {
-        html = escapeHTML(cfg.lastRunMessage);
+        html = escapeHTML(batchChannelExplainRunMessage(cfg) || cfg.lastRunMessage);
         show = true;
+        if (cfg.lastRunStatus === 'failed') isError = true;
     }
 
     if (el) {
         el.textContent = html;
         el.style.display = show ? '' : 'none';
+        el.classList.toggle('batch-status-text--error', isError);
     }
     syncBatchDailyCheckboxFromCfg(cfg);
     syncBatchDailyScheduleUI(cfg);
@@ -7079,6 +7108,9 @@ async function loadBatchChannelPage() {
         document.getElementById('batch-cron-hour')?.addEventListener('change', () => {
             updateBatchChannelMainButton(_batchChannelCfg);
             persistBatchChannelCronHourOnly();
+        });
+        document.getElementById('batch-channel-url')?.addEventListener('input', () => {
+            renderBatchChannelStatus(_batchChannelCfg);
         });
     }
 
