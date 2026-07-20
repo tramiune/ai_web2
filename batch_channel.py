@@ -44,7 +44,7 @@ ROOT = Path(__file__).resolve().parent
 CONFIG_DOC = "default"  # legacy admin doc; user configs use Firebase uid
 CONFIG_COLLECTION = "batchChannelConfig"
 RUNS_COLLECTION = "batchChannelRuns"
-TIKWM_USER_POSTS = "https://www.tikwm.com/api/user/posts"
+TIKWM_USER_POSTS = "https://nhay.cloud/api/tiktok-channel"
 VN_TZ = "Asia/Ho_Chi_Minh"
 # Đơn batch → VAE weavy-kling-26, gói 20s (MODELS.quality / modelId 127)
 BATCH_RENDER_PROVIDER = "videoaieasy"
