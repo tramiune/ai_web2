@@ -170,7 +170,9 @@ window.TRANSLATIONS = {
             upload_badge: "✨ Tùy chọn riêng",
             upload_hint: "Tải video mẫu của bạn lên",
             cta: "Tải lên video của bạn",
-            use_this: "⚡ Tạo video"
+            use_this: "⚡ Tạo video",
+            no_templates: "Chưa có template",
+            load_more: "Xem thêm video"
         },
         badges: {
             no_prompt: "Không cần prompt",
@@ -307,6 +309,8 @@ window.TRANSLATIONS = {
             create_new: "+ Tạo video mới",
             auto_video_btn: "Tạo video tự động",
             auto_video_new: "MỚI",
+            course_promo_btn: "Giảm sốc 50%",
+            course_promo_badge: "HOT",
             my_videos: "Video của tôi",
             build_channel: "Xây kênh tự động",
             topup_history: "Lịch sử nạp coin",
@@ -322,6 +326,8 @@ window.TRANSLATIONS = {
             note_email: "Hệ thống sẽ tự động gửi thông báo về Email khi video của bạn xử lý xong.",
             action_view: "🔍 Xem",
             action_view_details: "Xem chi tiết",
+            load_more_orders: "Xem thêm đơn hàng",
+            all_orders_loaded: "Đã hiển thị tất cả đơn hàng",
             first_order_offer_title: "Ưu đãi mỗi ngày 🎁",
             first_order_offer_desc: "Mỗi ngày <b>1 video</b> chỉ <b>1 Coin (~1.000đ)</b> — model <b>Ưu đãi nick mới · 720p · tối đa 20s</b>. Tối đa <b>3 lần</b>/tài khoản.",
             first_order_offer_cta: "Dùng ngay",
@@ -378,14 +384,15 @@ window.TRANSLATIONS = {
             tiktok_link_note: "Dán link video TikTok công khai — hệ thống tải về giúp bạn (tối đa 20 giây).",
             tiktok_url_required: "Vui lòng dán link TikTok.",
             tiktok_url_invalid: "Link không hợp lệ. Hãy dùng link video TikTok đầy đủ.",
-            tiktok_fetching: "Đang lấy video từ TikTok...",
-            tiktok_fetch_on_submit: "Đang tải video từ link TikTok...",
+            tiktok_fetching: "Đang tải video từ TikTok. Vui lòng không đóng trình duyệt...",
+            tiktok_fetch_on_submit: "Đang tải video từ TikTok. Vui lòng không đóng trình duyệt...",
             video_trim_title: "Đang cắt video...",
             video_trim_wait: "Vui lòng không tắt trang hoặc chuyển tab.",
             video_trim_loading: "Đang tải công cụ cắt video...",
             video_trimming: "Đang cắt video còn {sec} giây...",
             video_will_trim_on_submit: "Tự cắt còn {sec}s khi tạo video",
             video_too_long: "Video quá dài! Vui lòng chọn video tối đa {sec} giây.",
+            video_auto_trim_hint: "Video dài {dur}s. Hệ thống sẽ tự động cắt về {sec}s tương ứng với gói bạn chọn.",
             video_server_trim_pending: "Đang tải video...",
             video_server_trim_mobile: "Video sẽ được cắt trên server còn {sec}s (phù hợp điện thoại).",
             order_uploading_char: "Đang tải ảnh nhân vật lên...",
@@ -778,6 +785,18 @@ window.TRANSLATIONS = {
             terms_s6_title: "6. Giới hạn trách nhiệm",
             terms_s6_p: "Nhay Cloud nỗ lực cung cấp dịch vụ tốt nhất nhưng không đảm bảo kết quả AI sẽ luôn hoàn hảo 100% theo ý muốn của người dùng. Chúng tôi không chịu trách nhiệm về bất kỳ tổn thất gián tiếp nào phát sinh từ việc sử dụng dịch vụ.",
             terms_footer: "&copy; 2026 Nhay Cloud. <a href=\"privacy.html\" style=\"color: var(--primary);\">Chính sách bảo mật</a>"
+        },
+        course: {
+            modal_title: "GIẢM 50% GIÁ LÀM VIDEO TRỌN ĐỜI SAU KHÓA HỌC",
+            modal_subtitle: "Học làm video aff chuẩn đẹp và quy trình làm tự động chuyên nghiệp!",
+            package_title: "🎁 Gói Học Viên thực chiến",
+            feat1: "Giá học viên siêu rẻ: <strong>3k/video</strong> (Giảm 50% trọn đời sau khi học)",
+            feat2: "Học <strong>1 kèm 1</strong> thực chiến từ A-Z",
+            feat3: "Tặng ngay <strong>tool làm video tự động</strong> (Trị giá 299k)",
+            feat4: "Tặng ngay <strong>tool thay đồ, làm ảnh chuyên nghiệp</strong> (Trị giá 199k)",
+            original_price: "Gốc 1.500.000đ",
+            promo_price: "699.000đ",
+            zalo_support: "Tư vấn"
         }
     },
     en: {
@@ -1087,6 +1106,8 @@ window.TRANSLATIONS = {
             create_new: "+ Create New Video",
             auto_video_btn: "Auto-create videos",
             auto_video_new: "NEW",
+            course_promo_btn: "50% Off Course",
+            course_promo_badge: "HOT",
             my_videos: "My Videos",
             build_channel: "Auto channel",
             topup_history: "Top-up History",
@@ -1158,14 +1179,15 @@ window.TRANSLATIONS = {
             tiktok_link_note: "Paste a public TikTok video link — we'll download it for you (max 20 seconds).",
             tiktok_url_required: "Please paste a TikTok link.",
             tiktok_url_invalid: "Invalid link. Use a full TikTok video URL.",
-            tiktok_fetching: "Fetching video from TikTok...",
-            tiktok_fetch_on_submit: "Downloading video from TikTok link...",
+            tiktok_fetching: "Downloading video from TikTok. Please do not close your browser...",
+            tiktok_fetch_on_submit: "Downloading video from TikTok. Please do not close your browser...",
             video_trim_title: "Trimming video...",
             video_trim_wait: "Please keep this page open until trimming finishes.",
             video_trim_loading: "Loading video trim tool...",
             video_trimming: "Trimming video to {sec} seconds...",
             video_will_trim_on_submit: "Auto-trim to {sec}s when you create",
             video_too_long: "Video too long! Please choose a video under {sec} seconds.",
+            video_auto_trim_hint: "Video is {dur}s long. The system will automatically trim it to {sec}s to match your selected package.",
             video_server_trim_pending: "Uploading video...",
             video_server_trim_mobile: "Video will be trimmed on our server to {sec}s (mobile-friendly).",
             order_uploading_char: "Uploading character photo...",
@@ -1557,6 +1579,18 @@ window.TRANSLATIONS = {
             terms_s6_title: "6. Limitation of Liability",
             terms_s6_p: "Nhay Cloud strives to provide the best service but does not guarantee AI results will always be 100% perfect. We are not liable for any indirect losses arising from use of the service.",
             terms_footer: "&copy; 2026 Nhay Cloud. <a href=\"privacy.html\" style=\"color: var(--primary);\">Privacy Policy</a>"
+        },
+        course: {
+            modal_title: "50% COURSE DISCOUNT",
+            modal_subtitle: "Learn to make beautiful aff videos and professional automated workflows!",
+            package_title: "🎁 Practical Student Course",
+            feat1: "Cheap rate: <strong>$0.12/video</strong> (50% off lifetime after course)",
+            feat2: "<strong>1-on-1</strong> coaching from A-Z",
+            feat3: "Get a free <strong>automated video tool</strong> (Valued at $12)",
+            feat4: "Get a free <strong>outfit changer & professional image maker tool</strong> (Valued at $8)",
+            original_price: "Original $60.00",
+            promo_price: "$29.99",
+            zalo_support: "Support"
         }
     }
 };
