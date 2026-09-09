@@ -125,6 +125,74 @@ def batch_error_user_message(err: Exception | str) -> str:
 
 def fetch_channel_videos(username: str, *, max_pages: int = 5) -> list[dict]:
     username = parse_tiktok_username(username)
+
+    # 1. Thử cào qua Apify nếu có token
+    apify_token = os.environ.get("APIFY_TOKEN") or get_env("APIFY_TOKEN")
+    if apify_token:
+        print(f"   [Apify] Đang cào kênh @{username} qua Apify (Async)...")
+        try:
+            start_url = f"https://api.apify.com/v2/acts/clockworks~tiktok-scraper/runs?token={apify_token}"
+            payload = {
+                "profiles": [username],
+                "resultsPerPage": 60,
+                "shouldDownloadVideos": False,
+                "shouldDownloadCovers": False,
+                "shouldDownloadSlideshowImages": False
+            }
+            res = requests.post(start_url, json=payload, timeout=40)
+            if res.ok:
+                run_data = res.json().get("data", {})
+                run_id = run_data.get("id")
+                dataset_id = run_data.get("defaultDatasetId")
+                if run_id and dataset_id:
+                    # Poll cho tới khi hoàn tất
+                    poll_url = f"https://api.apify.com/v2/actor-runs/{run_id}?token={apify_token}"
+                    status = "RUNNING"
+                    start_time = time.time()
+                    while time.time() - start_time < 90:
+                        status_res = requests.get(poll_url, timeout=20)
+                        if status_res.ok:
+                            status_data = status_res.json().get("data", {})
+                            status = status_data.get("status")
+                            if status in ("SUCCEEDED", "FAILED", "TIMED-OUT", "ABORTED"):
+                                break
+                        time.sleep(3)
+
+                    if status == "SUCCEEDED":
+                        items_url = f"https://api.apify.com/v2/datasets/{dataset_id}/items?token={apify_token}"
+                        items_res = requests.get(items_url, timeout=40)
+                        if items_res.ok:
+                            items = items_res.json()
+                            videos = []
+                            for item in items:
+                                vid = item.get("id") or item.get("video_id")
+                                if not vid:
+                                    continue
+                                timestamp = item.get("createTime") or item.get("create_time") or 0
+                                videos.append({
+                                    "video_id": str(vid),
+                                    "create_time": int(timestamp),
+                                    "web_video_url": f"https://www.tiktok.com/@{username}/video/{vid}",
+                                    "hdplay": "",
+                                    "play": "",
+                                    "wmplay": "",
+                                })
+                            print(f"   ✅ [Apify] Lấy thành công {len(videos)} video từ Apify.")
+                            if videos:
+                                return videos
+                        else:
+                            print(f"   ⚠️ Lỗi lấy dữ liệu dataset từ Apify: HTTP {items_res.status_code}")
+                    else:
+                        print(f"   ⚠️ Apify actor kết thúc với trạng thái: {status}")
+                else:
+                    print(f"   ⚠️ Không lấy được run_id hoặc dataset_id từ kết quả khởi động Apify.")
+            else:
+                print(f"   ⚠️ Lỗi khi khởi động Apify actor: HTTP {res.status_code} - {res.text[:200]}")
+        except Exception as e:
+            print(f"   ⚠️ Lỗi khi cào qua Apify: {e}. Sẽ thử fallback qua API cũ...")
+
+    # 2. Fallback qua API tikwm cũ (TIKWM_USER_POSTS)
+    print(f"   [API] Đang cào kênh @{username} qua API...")
     videos: list[dict] = []
     cursor = 0
     headers = {
